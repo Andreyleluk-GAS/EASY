@@ -1,421 +1,371 @@
 import React, { useState, useEffect, useRef } from 'react';
 
+const TRANSPORT_INFO = {
+  vp8channel: { label: 'vp8channel', desc: 'Высокая скорость', rec: true },
+  datachannel: { label: 'datachannel', desc: 'Максимальная скорость' },
+  seichannel: { label: 'seichannel', desc: 'Средняя скорость' },
+  videochannel: { label: 'videochannel', desc: 'Низкая скорость' },
+};
+
+const PROVIDER_WARN = {
+  jazz: { datachannel: '⚠️ Jazz забанит IP за datachannel!' },
+  telemost: { datachannel: '❌ Не поддерживается', seichannel: '❌ Не поддерживается' },
+};
+
+const PROVIDER_REC = { telemost: 'vp8channel', wbstream: 'datachannel', jazz: 'vp8channel' };
+
 export default function App() {
-  const [page, setPage] = useState('loading'); // loading, install, dashboard
+  const [page, setPage] = useState('loading');
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
-  const [installResult, setInstallResult] = useState(null);
   const [logs, setLogs] = useState('');
   const [showLogs, setShowLogs] = useState(false);
   const [installing, setInstalling] = useState(false);
-  const [installProgress, setInstallProgress] = useState('');
+  const [provTransports, setProvTransports] = useState({});
+  const [selProvider, setSelProvider] = useState('jazz');
+  const [copied, setCopied] = useState('');
+  const [installMode, setInstallMode] = useState('full'); // full, reconfig, update
   const logsRef = useRef(null);
 
-  // Загрузка статуса при старте
-  useEffect(() => {
-    fetchStatus();
-  }, []);
+  useEffect(() => { fetchStatus(); fetchTransports(); }, []);
 
   const fetchStatus = async () => {
     try {
-      const res = await fetch('/api/status');
-      const data = await res.json();
-      setStatus(data);
-      
-      if (data.installed && data.config) {
-        setPage('dashboard');
-      } else {
-        setPage('install');
-      }
-    } catch (err) {
-      setPage('install');
-    }
+      const r = await fetch('/api/status');
+      const d = await r.json();
+      setStatus(d);
+      setPage(d.installed && d.config ? 'dashboard' : 'install');
+    } catch { setPage('install'); }
+  };
+
+  const fetchTransports = async () => {
+    try {
+      const r = await fetch('/api/provider_transports');
+      setProvTransports(await r.json());
+    } catch {}
   };
 
   const fetchLogs = async () => {
     try {
-      const res = await fetch('/api/logs?lines=100');
-      const data = await res.json();
-      if (data.success) {
-        setLogs(data.logs);
-        setTimeout(() => {
-          if (logsRef.current) logsRef.current.scrollTop = logsRef.current.scrollHeight;
-        }, 100);
-      }
-    } catch (err) {
-      setLogs('Ошибка загрузки логов');
-    }
+      const r = await fetch('/api/logs?lines=100');
+      const d = await r.json();
+      setLogs(d.logs || d.error || '');
+      setTimeout(() => { if (logsRef.current) logsRef.current.scrollTop = logsRef.current.scrollHeight; }, 50);
+    } catch { setLogs('Ошибка загрузки'); }
   };
 
   const handleInstall = async (e) => {
     e.preventDefault();
-    setInstalling(true);
-    setError(null);
-    setInstallProgress('Запускаем установку... Это может занять 5-30 минут.');
-
-    const formData = new FormData(e.target);
-
+    setInstalling(true); setError(null); setSuccess(null);
+    const fd = new FormData(e.target);
+    const endpoint = installMode === 'reconfig' ? '/api/reconfigure' : '/api/install';
     try {
-      const res = await fetch('/api/install', {
-        method: 'POST',
-        body: formData,
-      });
-      const data = await res.json();
-
-      if (data.success) {
-        setInstallResult(data.config);
-        setSuccess('OlcRTC успешно установлен и запущен!');
-        await fetchStatus();
-        setPage('dashboard');
-      } else {
-        setError(`Ошибка на этапе "${data.step}": ${data.error}`);
-      }
-    } catch (err) {
-      setError('Ошибка сети. Сервер недоступен.');
-    } finally {
-      setInstalling(false);
-      setInstallProgress('');
-    }
+      const r = await fetch(endpoint, { method: 'POST', body: fd });
+      const d = await r.json();
+      if (d.success) {
+        setSuccess(installMode === 'reconfig' ? 'Конфигурация обновлена!' : 'OlcRTC установлен и запущен!');
+        await fetchStatus(); setPage('dashboard');
+      } else { setError(`Ошибка (${d.step || '?'}): ${d.error}`); }
+    } catch { setError('Ошибка сети'); }
+    finally { setInstalling(false); }
   };
 
-  const handleAction = async (action) => {
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
+  const doAction = async (action, body) => {
+    setLoading(true); setError(null); setSuccess(null);
     try {
-      const res = await fetch(`/api/${action}`, { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
-        setSuccess(action === 'uninstall' 
-          ? 'OlcRTC полностью удалён.' 
-          : `Действие "${action}" выполнено.`
-        );
-        if (action === 'uninstall') {
-          setPage('install');
-          setInstallResult(null);
-        }
+      const r = await fetch(`/api/${action}`, { method: 'POST', ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) });
+      const d = await r.json();
+      if (d.success) {
+        const msgs = { stop: 'Остановлен', start: 'Запущен', restart: 'Перезапущен', uninstall: 'Удалён', update_binary: 'Обновлён' };
+        setSuccess(msgs[action] || 'Готово');
+        if (action === 'uninstall') { setPage('install'); }
         await fetchStatus();
-      } else {
-        setError(data.error || 'Ошибка');
-      }
-    } catch (err) {
-      setError('Ошибка сети');
-    } finally {
-      setLoading(false);
-    }
+      } else { setError(d.error || 'Ошибка'); }
+    } catch { setError('Ошибка сети'); }
+    finally { setLoading(false); }
   };
 
-  const copyToClipboard = (text) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setSuccess('Скопировано в буфер обмена!');
-      setTimeout(() => setSuccess(null), 2000);
-    });
+  const copy = (text, label) => {
+    navigator.clipboard.writeText(text);
+    setCopied(label); setTimeout(() => setCopied(''), 1500);
   };
+
+  const providerLabel = { telemost: 'Yandex Telemost', wbstream: 'WB Stream', jazz: 'Sber SaluteJazz' };
+  const cfg = status?.config || {};
+  const uri = cfg.S_PROVIDER ? `olcrtc://${cfg.S_PROVIDER}?${cfg.S_TRANSPORT}@${cfg.S_ROOM_ID}#${cfg.S_ENC_KEY}%${cfg.S_CLIENT_ID}$OlcRTC_Server` : '';
+  const availTransports = provTransports[selProvider] || ['vp8channel', 'videochannel'];
 
   return (
-    <div className="app-container">
+    <div className="root">
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-        :root {
-          --bg: #0a0e1a; --card: #111827; --card-hover: #1a2035;
-          --text: #f1f5f9; --muted: #64748b; --accent: #10b981; --accent-hover: #059669;
-          --blue: #3b82f6; --red: #ef4444; --yellow: #f59e0b; --purple: #8b5cf6;
-          --border: rgba(255,255,255,0.06); --input-bg: #1e293b; --input-border: #334155;
-        }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
-        .app-container { max-width: 720px; margin: 0 auto; padding: 24px 16px; min-height: 100vh; }
-
-        /* Header */
-        .header { text-align: center; padding: 32px 0 24px; }
-        .logo { font-size: 32px; font-weight: 700; background: linear-gradient(135deg, #10b981, #3b82f6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
-        .subtitle { color: var(--muted); font-size: 14px; margin-top: 4px; }
-        .server-ip { display: inline-block; margin-top: 8px; padding: 4px 14px; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.2); border-radius: 20px; font-size: 12px; color: var(--accent); font-family: 'JetBrains Mono', monospace; }
-
-        /* Cards */
-        .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 28px; margin-bottom: 16px; transition: all 0.2s; }
-        .card-title { font-size: 18px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
-        
-        /* Status indicator */
-        .status-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: rgba(0,0,0,0.2); border-radius: 12px; margin-bottom: 12px; }
-        .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 8px; }
-        .status-dot.active { background: #10b981; box-shadow: 0 0 8px rgba(16,185,129,0.5); animation: pulse 2s infinite; }
-        .status-dot.inactive { background: #ef4444; box-shadow: 0 0 8px rgba(239,68,68,0.3); }
-        .status-dot.unknown { background: #64748b; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-
-        /* Config items */
-        .config-grid { display: grid; gap: 8px; }
-        .config-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: rgba(0,0,0,0.15); border-radius: 10px; font-size: 14px; }
-        .config-label { color: var(--muted); font-size: 13px; }
-        .config-value { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--accent); cursor: pointer; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .config-value:hover { color: #34d399; }
-
-        /* URI box */
-        .uri-box { margin-top: 16px; padding: 14px; background: rgba(139,92,246,0.08); border: 1px solid rgba(139,92,246,0.2); border-radius: 12px; }
-        .uri-label { font-size: 12px; color: var(--purple); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
-        .uri-value { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #c4b5fd; word-break: break-all; line-height: 1.5; cursor: pointer; }
-        .uri-value:hover { color: #e0d5ff; }
-
-        /* Form */
-        .form-group { margin-bottom: 18px; }
-        .form-label { display: block; font-size: 13px; font-weight: 500; color: var(--muted); margin-bottom: 6px; }
-        .form-input, .form-select { width: 100%; padding: 12px 14px; background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 10px; color: var(--text); font-size: 15px; font-family: 'Inter', sans-serif; outline: none; transition: 0.2s; }
-        .form-input:focus, .form-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(16,185,129,0.15); }
-        .form-select option { background: var(--card); }
-        .form-hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
-
-        /* Buttons */
-        .btn { padding: 12px 20px; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; font-family: 'Inter', sans-serif; display: inline-flex; align-items: center; gap: 8px; justify-content: center; }
-        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .btn-primary { width: 100%; background: var(--accent); color: white; padding: 14px; font-size: 15px; }
-        .btn-primary:hover:not(:disabled) { background: var(--accent-hover); transform: translateY(-1px); }
-        .btn-sm { padding: 8px 16px; font-size: 13px; border-radius: 8px; }
-        .btn-green { background: rgba(16,185,129,0.15); color: var(--accent); border: 1px solid rgba(16,185,129,0.2); }
-        .btn-green:hover:not(:disabled) { background: rgba(16,185,129,0.25); }
-        .btn-blue { background: rgba(59,130,246,0.15); color: var(--blue); border: 1px solid rgba(59,130,246,0.2); }
-        .btn-blue:hover:not(:disabled) { background: rgba(59,130,246,0.25); }
-        .btn-red { background: rgba(239,68,68,0.1); color: var(--red); border: 1px solid rgba(239,68,68,0.15); }
-        .btn-red:hover:not(:disabled) { background: rgba(239,68,68,0.2); }
-        .btn-yellow { background: rgba(245,158,11,0.1); color: var(--yellow); border: 1px solid rgba(245,158,11,0.15); }
-        .btn-yellow:hover:not(:disabled) { background: rgba(245,158,11,0.2); }
-        .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
-
-        /* Alerts */
-        .alert { padding: 14px 16px; border-radius: 12px; font-size: 14px; margin-bottom: 16px; animation: slideIn 0.3s; display: flex; align-items: flex-start; gap: 10px; }
-        .alert-error { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.2); color: #fca5a5; }
-        .alert-success { background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.2); color: #6ee7b7; }
-        .alert-warning { background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.2); color: #fcd34d; }
-        @keyframes slideIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
-
-        /* Logs */
-        .logs-container { background: #0d1117; border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-top: 12px; max-height: 400px; overflow-y: auto; }
-        .logs-text { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #8b949e; line-height: 1.7; white-space: pre-wrap; word-break: break-all; }
-
-        /* Install progress */
-        .install-progress { text-align: center; padding: 40px 20px; }
-        .spinner { width: 48px; height: 48px; border: 4px solid rgba(16,185,129,0.2); border-radius: 50%; border-top-color: var(--accent); animation: spin 1s linear infinite; margin: 0 auto 20px; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .progress-text { color: var(--accent); font-weight: 500; font-size: 16px; }
-        .progress-sub { color: var(--muted); font-size: 13px; margin-top: 8px; }
-
-        /* Loading */
-        .loading-screen { text-align: center; padding: 80px 20px; }
-
-        /* Responsive */
-        @media (max-width: 480px) {
-          .app-container { padding: 16px 12px; }
-          .card { padding: 20px 16px; }
-          .btn-row { flex-direction: column; }
-          .config-value { max-width: 180px; }
-        }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap');
+:root{--bg:#0a0e1a;--card:#111827;--text:#f1f5f9;--muted:#64748b;--accent:#10b981;--ah:#059669;--blue:#3b82f6;--red:#ef4444;--yellow:#f59e0b;--purple:#8b5cf6;--border:rgba(255,255,255,.06);--ibg:#1e293b;--ib:#334155}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+.root{max-width:700px;margin:0 auto;padding:20px 14px}
+.hdr{text-align:center;padding:28px 0 20px}
+.logo{font-size:30px;font-weight:700;background:linear-gradient(135deg,#10b981,#3b82f6);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.sub{color:var(--muted);font-size:13px;margin-top:3px}
+.chip{display:inline-block;margin-top:8px;padding:3px 12px;background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.2);border-radius:16px;font-size:11px;color:var(--accent);font-family:'JetBrains Mono',monospace}
+.sysinfo{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:6px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:24px;margin-bottom:14px}
+.ct{font-size:17px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.sr{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:rgba(0,0,0,.2);border-radius:10px;margin-bottom:10px}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:7px}
+.dot.on{background:#10b981;box-shadow:0 0 8px rgba(16,185,129,.5);animation:pulse 2s infinite}
+.dot.off{background:#ef4444;box-shadow:0 0 6px rgba(239,68,68,.3)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.cg{display:grid;gap:6px}
+.ci{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:rgba(0,0,0,.15);border-radius:8px;font-size:13px}
+.cl{color:var(--muted);font-size:12px}
+.cv{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--accent);cursor:pointer;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cv:hover{color:#34d399}
+.ub{margin-top:14px;padding:12px;background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.2);border-radius:10px;cursor:pointer}
+.ub:hover{background:rgba(139,92,246,.14)}
+.ul{font-size:11px;color:var(--purple);font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
+.uv{font-family:'JetBrains Mono',monospace;font-size:10px;color:#c4b5fd;word-break:break-all;line-height:1.4}
+.fg{margin-bottom:16px}
+.fl{display:block;font-size:12px;font-weight:500;color:var(--muted);margin-bottom:5px}
+.fi,.fs{width:100%;padding:11px 12px;background:var(--ibg);border:1px solid var(--ib);border-radius:9px;color:var(--text);font-size:14px;font-family:'Inter',sans-serif;outline:none;transition:.2s}
+.fi:focus,.fs:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(16,185,129,.15)}
+.fs option{background:var(--card)}
+.fh{font-size:10px;color:var(--muted);margin-top:3px}
+.fw{font-size:11px;color:var(--yellow);margin-top:3px}
+.btn{padding:10px 16px;border:none;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;transition:.2s;font-family:'Inter',sans-serif;display:inline-flex;align-items:center;gap:6px;justify-content:center}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.bp{width:100%;background:var(--accent);color:#fff;padding:13px;font-size:14px;margin-top:4px}
+.bp:hover:not(:disabled){background:var(--ah);transform:translateY(-1px)}
+.bs{padding:7px 14px;font-size:12px;border-radius:7px}
+.bg{background:rgba(16,185,129,.12);color:var(--accent);border:1px solid rgba(16,185,129,.2)}
+.bg:hover:not(:disabled){background:rgba(16,185,129,.22)}
+.bb{background:rgba(59,130,246,.12);color:var(--blue);border:1px solid rgba(59,130,246,.2)}
+.bb:hover:not(:disabled){background:rgba(59,130,246,.22)}
+.br{background:rgba(239,68,68,.08);color:var(--red);border:1px solid rgba(239,68,68,.15)}
+.br:hover:not(:disabled){background:rgba(239,68,68,.18)}
+.by{background:rgba(245,158,11,.08);color:var(--yellow);border:1px solid rgba(245,158,11,.15)}
+.by:hover:not(:disabled){background:rgba(245,158,11,.18)}
+.brow{display:flex;gap:7px;flex-wrap:wrap}
+.alert{padding:12px 14px;border-radius:10px;font-size:13px;margin-bottom:14px;animation:si .3s;display:flex;align-items:flex-start;gap:8px}
+.ae{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);color:#fca5a5}
+.as{background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);color:#6ee7b7}
+@keyframes si{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+.lc{background:#0d1117;border:1px solid var(--border);border-radius:10px;padding:14px;margin-top:10px;max-height:350px;overflow-y:auto}
+.lt{font-family:'JetBrains Mono',monospace;font-size:11px;color:#8b949e;line-height:1.6;white-space:pre-wrap;word-break:break-all}
+.spinner{width:44px;height:44px;border:3px solid rgba(16,185,129,.2);border-radius:50%;border-top-color:var(--accent);animation:spin 1s linear infinite;margin:0 auto 16px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ip{text-align:center;padding:36px 16px}
+.tabs{display:flex;gap:4px;margin-bottom:16px;background:rgba(0,0,0,.2);padding:4px;border-radius:10px}
+.tab{flex:1;padding:8px;text-align:center;border-radius:7px;font-size:12px;font-weight:500;cursor:pointer;color:var(--muted);transition:.2s}
+.tab.active{background:var(--accent);color:#fff}
+.tab:hover:not(.active){color:var(--text)}
+@media(max-width:480px){.root{padding:14px 10px}.card{padding:18px 14px}.brow{flex-direction:column}.cv{max-width:160px}}
       `}</style>
 
-      {/* Header */}
-      <div className="header">
+      <div className="hdr">
         <div className="logo">OlcRTC Panel</div>
-        <div className="subtitle">Панель управления прокси-сервером</div>
-        {status?.server_ip && (
-          <div className="server-ip">🖥 {status.server_ip}</div>
+        <div className="sub">Панель управления прокси-сервером</div>
+        {status?.server_ip && <div className="chip">🖥 {status.server_ip}</div>}
+        {status && (
+          <div className="sysinfo">
+            {status.ram && <div className="chip">RAM {status.ram}</div>}
+            {status.disk && <div className="chip">Диск {status.disk}</div>}
+          </div>
         )}
       </div>
 
-      {/* Alerts */}
-      {error && (
-        <div className="alert alert-error">
-          <span>⚠️</span><span>{error}</span>
-        </div>
-      )}
-      {success && (
-        <div className="alert alert-success">
-          <span>✅</span><span>{success}</span>
-        </div>
-      )}
+      {error && <div className="alert ae"><span>⚠️</span><span>{error}</span></div>}
+      {success && <div className="alert as"><span>✅</span><span>{success}</span></div>}
 
-      {/* Loading */}
-      {page === 'loading' && (
-        <div className="loading-screen">
-          <div className="spinner"></div>
-          <div className="progress-text">Загрузка панели...</div>
-        </div>
-      )}
+      {page === 'loading' && <div className="ip"><div className="spinner"/><div style={{color:'var(--accent)',fontWeight:500}}>Загрузка...</div></div>}
 
-      {/* ===================== INSTALL PAGE ===================== */}
+      {/* ══════ INSTALL / RECONFIG ══════ */}
       {page === 'install' && !installing && (
         <div className="card">
-          <div className="card-title">🚀 Установка OlcRTC</div>
-          
+          <div className="ct">🚀 {installMode === 'reconfig' ? 'Изменить конфигурацию' : 'Установка OlcRTC'}</div>
+
+          {status?.installed && (
+            <div className="tabs">
+              <div className={`tab ${installMode==='reconfig'?'active':''}`} onClick={()=>setInstallMode('reconfig')}>⚙️ Переконфигурация</div>
+              <div className={`tab ${installMode==='full'?'active':''}`} onClick={()=>setInstallMode('full')}>🔄 Переустановка</div>
+            </div>
+          )}
+
           <form onSubmit={handleInstall}>
-            <div className="form-group">
-              <label className="form-label">Провайдер</label>
-              <select name="provider" className="form-select" defaultValue="3">
-                <option value="3">Sber SaluteJazz</option>
-                <option value="1">Yandex Telemost</option>
-                <option value="2">WB Stream</option>
+            {/* Провайдер */}
+            <div className="fg">
+              <label className="fl">Провайдер</label>
+              <select name="provider" className="fs" value={selProvider} onChange={e => setSelProvider(e.target.value)}>
+                <option value="jazz">Sber SaluteJazz</option>
+                <option value="telemost">Yandex Telemost</option>
+                <option value="wbstream">WB Stream</option>
               </select>
             </div>
 
-            <div className="form-group">
-              <label className="form-label">Транспорт</label>
-              <select name="transport" className="form-select" defaultValue="1">
-                <option value="1">vp8channel (Рекомендуется)</option>
-                <option value="2">videochannel</option>
-                <option value="3">seichannel</option>
-                <option value="4">datachannel</option>
+            {/* Транспорт */}
+            <div className="fg">
+              <label className="fl">Транспорт</label>
+              <select name="transport" className="fs" defaultValue={PROVIDER_REC[selProvider]}>
+                {availTransports.map(t => {
+                  const info = TRANSPORT_INFO[t] || {};
+                  const warn = PROVIDER_WARN[selProvider]?.[t];
+                  return (
+                    <option key={t} value={t}>
+                      {info.label || t} — {info.desc || ''} {info.rec || t === PROVIDER_REC[selProvider] ? '(рекомендуется)' : ''} {warn || ''}
+                    </option>
+                  );
+                })}
               </select>
+              {selProvider === 'jazz' && <div className="fw">⚠️ datachannel — Jazz банит IP за этот трафик!</div>}
+              {selProvider === 'telemost' && <div className="fw">ℹ️ Telemost поддерживает только vp8channel и videochannel</div>}
             </div>
 
-            <div className="form-group">
-              <label className="form-label">Ссылка на комнату или ID</label>
-              <input type="text" name="room" className="form-input" required placeholder="https://salutejazz.ru/calls/xxxxx или ID" />
-              <div className="form-hint">Вставьте полную ссылку — ID и пароль извлекутся автоматически</div>
+            {/* Ссылка на комнату */}
+            <div className="fg">
+              <label className="fl">Ссылка на комнату или ID</label>
+              <input name="room" className="fi" required placeholder={
+                selProvider === 'jazz' ? 'https://salutejazz.ru/calls/xxxxx?psw=...' :
+                selProvider === 'telemost' ? 'https://telemost.yandex.ru/j/xxxxx' :
+                'https://stream.wb.ru/room/xxxxx'
+              } defaultValue={cfg.S_ROOM_ID || ''} />
+              <div className="fh">Вставьте полную ссылку — ID и пароль будут извлечены автоматически</div>
             </div>
 
-            <div className="form-group">
-              <label className="form-label">Имя бота (для Jazz)</label>
-              <input type="text" name="bot_name" className="form-input" placeholder="Оставьте пустым для случайного имени" />
+            {/* Имя бота (Jazz) */}
+            {selProvider === 'jazz' && (
+              <div className="fg">
+                <label className="fl">Имя бота в конференции</label>
+                <input name="bot_name" className="fi" placeholder="Случайное русское имя" defaultValue={cfg.S_BOT_NAME || ''} />
+              </div>
+            )}
+
+            {/* Ключ шифрования */}
+            <div className="fg">
+              <label className="fl">Ключ шифрования (hex, 64 символа)</label>
+              <input name="enc_key" className="fi" placeholder="Оставьте пустым для авто-генерации" defaultValue={installMode==='reconfig' ? (cfg.S_ENC_KEY||'') : ''} />
+              <div className="fh">Автоматически сгенерируется надёжный ключ</div>
             </div>
 
-            <button type="submit" className="btn btn-primary" disabled={installing}>
-              🚀 Установить и запустить OlcRTC
+            {/* ID клиента */}
+            <div className="fg">
+              <label className="fl">ID клиента</label>
+              <input name="client_id" className="fi" placeholder="Оставьте пустым для авто-генерации" defaultValue={installMode==='reconfig' ? (cfg.S_CLIENT_ID||'') : ''} />
+            </div>
+
+            <button type="submit" className="btn bp" disabled={installing}>
+              {installMode === 'reconfig' ? '⚙️ Применить конфигурацию' : '🚀 Установить и запустить'}
             </button>
+
+            {status?.installed && (
+              <button type="button" className="btn bp" style={{marginTop:8,background:'transparent',border:'1px solid var(--ib)',color:'var(--muted)'}} onClick={() => { setPage('dashboard'); setError(null); setSuccess(null); }}>
+                ← Назад к панели
+              </button>
+            )}
           </form>
         </div>
       )}
 
-      {/* Install Progress */}
+      {/* Install progress */}
       {installing && (
-        <div className="card">
-          <div className="install-progress">
-            <div className="spinner"></div>
-            <div className="progress-text">Установка OlcRTC</div>
-            <div className="progress-sub">{installProgress}</div>
-            <div className="progress-sub" style={{ marginTop: '16px', fontSize: '12px' }}>
-              ⚡ Первая установка включает компиляцию Go-бинарника.<br/>
-              Это может занять 5–30 минут в зависимости от мощности сервера.<br/>
-              Не закрывайте страницу!
-            </div>
+        <div className="card"><div className="ip">
+          <div className="spinner"/>
+          <div style={{color:'var(--accent)',fontWeight:500,fontSize:15}}>
+            {installMode === 'reconfig' ? 'Применяем конфигурацию...' : 'Установка OlcRTC'}
           </div>
-        </div>
-      )}
-
-      {/* ===================== DASHBOARD ===================== */}
-      {page === 'dashboard' && status && (
-        <>
-          {/* Status Card */}
-          <div className="card">
-            <div className="card-title">📊 Статус</div>
-            <div className="status-row">
-              <div style={{ display: 'flex', alignItems: 'center' }}>
-                <span className={`status-dot ${status.running ? 'active' : 'inactive'}`}></span>
-                <span style={{ fontWeight: 600 }}>
-                  {status.running ? 'Работает' : 'Остановлен'}
-                </span>
-              </div>
-              {status.uptime && (
-                <span style={{ color: 'var(--muted)', fontSize: '13px' }}>{status.uptime}</span>
-              )}
-            </div>
-            
-            <div className="btn-row">
-              {status.running ? (
-                <>
-                  <button className="btn btn-sm btn-yellow" disabled={loading} onClick={() => handleAction('restart')}>
-                    🔄 Перезапуск
-                  </button>
-                  <button className="btn btn-sm btn-red" disabled={loading} onClick={() => handleAction('stop')}>
-                    ⏹ Стоп
-                  </button>
-                </>
-              ) : (
-                <button className="btn btn-sm btn-green" disabled={loading} onClick={() => handleAction('start')}>
-                  ▶️ Запуск
-                </button>
-              )}
-              <button className="btn btn-sm btn-blue" onClick={() => { setShowLogs(!showLogs); if (!showLogs) fetchLogs(); }}>
-                📋 {showLogs ? 'Скрыть логи' : 'Логи'}
-              </button>
-            </div>
-
-            {showLogs && (
-              <div className="logs-container" ref={logsRef}>
-                <pre className="logs-text">{logs || 'Загрузка...'}</pre>
-                <button className="btn btn-sm btn-blue" style={{ marginTop: '10px' }} onClick={fetchLogs}>
-                  🔄 Обновить
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Config Card */}
-          {status.config && (
-            <div className="card">
-              <div className="card-title">⚙️ Конфигурация</div>
-              <div className="config-grid">
-                <div className="config-item">
-                  <span className="config-label">Провайдер</span>
-                  <span className="config-value">{status.config.S_PROVIDER}</span>
-                </div>
-                <div className="config-item">
-                  <span className="config-label">Транспорт</span>
-                  <span className="config-value">{status.config.S_TRANSPORT}</span>
-                </div>
-                <div className="config-item">
-                  <span className="config-label">ID звонка</span>
-                  <span className="config-value" title="Нажмите для копирования" onClick={() => copyToClipboard(status.config.S_ROOM_ID)}>
-                    {status.config.S_ROOM_ID}
-                  </span>
-                </div>
-                <div className="config-item">
-                  <span className="config-label">Ключ шифрования</span>
-                  <span className="config-value" title="Нажмите для копирования" onClick={() => copyToClipboard(status.config.S_ENC_KEY)}>
-                    {status.config.S_ENC_KEY}
-                  </span>
-                </div>
-                <div className="config-item">
-                  <span className="config-label">ID клиента</span>
-                  <span className="config-value" title="Нажмите для копирования" onClick={() => copyToClipboard(status.config.S_CLIENT_ID)}>
-                    {status.config.S_CLIENT_ID}
-                  </span>
-                </div>
-                {status.config.S_BOT_NAME && (
-                  <div className="config-item">
-                    <span className="config-label">Имя бота</span>
-                    <span className="config-value">{status.config.S_BOT_NAME}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* URI */}
-              <div className="uri-box" onClick={() => copyToClipboard(`olcrtc://${status.config.S_PROVIDER}?${status.config.S_TRANSPORT}@${status.config.S_ROOM_ID}#${status.config.S_ENC_KEY}%${status.config.S_CLIENT_ID}$OlcRTC_Server`)}>
-                <div className="uri-label">📥 URI для Olcbox (нажмите для копирования)</div>
-                <div className="uri-value">
-                  olcrtc://{status.config.S_PROVIDER}?{status.config.S_TRANSPORT}@{status.config.S_ROOM_ID}#{status.config.S_ENC_KEY}%{status.config.S_CLIENT_ID}$OlcRTC_Server
-                </div>
-              </div>
+          {installMode !== 'reconfig' && (
+            <div style={{color:'var(--muted)',fontSize:12,marginTop:10,lineHeight:1.6}}>
+              Первая установка включает компиляцию Go-бинарника.<br/>
+              Это может занять 5–30 минут. Не закрывайте страницу!
             </div>
           )}
+        </div></div>
+      )}
 
-          {/* Actions */}
+      {/* ══════ DASHBOARD ══════ */}
+      {page === 'dashboard' && status && (<>
+        {/* Status */}
+        <div className="card">
+          <div className="ct">📊 Статус</div>
+          <div className="sr">
+            <div style={{display:'flex',alignItems:'center'}}>
+              <span className={`dot ${status.running?'on':'off'}`}/>
+              <span style={{fontWeight:600}}>{status.running ? 'Работает' : 'Остановлен'}</span>
+            </div>
+            {status.uptime && <span style={{color:'var(--muted)',fontSize:12}}>{status.uptime}</span>}
+          </div>
+          {status.has_update && (
+            <div className="alert" style={{background:'rgba(59,130,246,.08)',border:'1px solid rgba(59,130,246,.2)',color:'#93c5fd',marginBottom:10}}>
+              <span>🔄</span><span>Доступно обновление OlcRTC</span>
+            </div>
+          )}
+          <div className="brow">
+            {status.running ? (<>
+              <button className="btn bs by" disabled={loading} onClick={()=>doAction('restart')}>🔄 Перезапуск</button>
+              <button className="btn bs br" disabled={loading} onClick={()=>doAction('stop')}>⏹ Стоп</button>
+            </>) : (
+              <button className="btn bs bg" disabled={loading} onClick={()=>doAction('start')}>▶️ Запуск</button>
+            )}
+            <button className="btn bs bb" onClick={()=>{setShowLogs(!showLogs);if(!showLogs)fetchLogs();}}>📋 {showLogs?'Скрыть':'Логи'}</button>
+            {status.has_update && (
+              <button className="btn bs bb" disabled={loading} onClick={()=>{if(window.confirm('Обновить бинарник? Это займёт 5-30 минут.'))doAction('update_binary')}}>⬆️ Обновить</button>
+            )}
+          </div>
+          {showLogs && (
+            <div className="lc" ref={logsRef}>
+              <pre className="lt">{logs||'Загрузка...'}</pre>
+              <button className="btn bs bb" style={{marginTop:8}} onClick={fetchLogs}>🔄 Обновить</button>
+            </div>
+          )}
+        </div>
+
+        {/* Config */}
+        {cfg.S_PROVIDER && (
           <div className="card">
-            <div className="card-title">🛠 Управление</div>
-            <div className="btn-row">
-              <button className="btn btn-sm btn-blue" onClick={() => { setPage('install'); setError(null); setSuccess(null); }}>
-                ⚙️ Переконфигурировать
-              </button>
-              <button className="btn btn-sm btn-red" disabled={loading} onClick={() => {
-                if (window.confirm('Вы уверены? Это полностью удалит OlcRTC с сервера.')) {
-                  handleAction('uninstall');
-                }
-              }}>
-                🗑 Удалить OlcRTC
-              </button>
+            <div className="ct">⚙️ Конфигурация</div>
+            <div className="cg">
+              {[
+                ['Провайдер', providerLabel[cfg.S_PROVIDER]||cfg.S_PROVIDER, cfg.S_PROVIDER],
+                ['Транспорт', cfg.S_TRANSPORT, cfg.S_TRANSPORT],
+                ['ID звонка', cfg.S_ROOM_ID, cfg.S_ROOM_ID],
+                ['Ключ шифрования', cfg.S_ENC_KEY, cfg.S_ENC_KEY],
+                ['ID клиента', cfg.S_CLIENT_ID, cfg.S_CLIENT_ID],
+              ].map(([label, display, val]) => (
+                <div className="ci" key={label}>
+                  <span className="cl">{label}</span>
+                  <span className="cv" title="Копировать" onClick={()=>copy(val,label)}>
+                    {copied===label ? '✓' : display}
+                  </span>
+                </div>
+              ))}
+              {cfg.S_BOT_NAME && (
+                <div className="ci"><span className="cl">Имя бота</span><span className="cv">{cfg.S_BOT_NAME}</span></div>
+              )}
+            </div>
+
+            {uri && (
+              <div className="ub" onClick={()=>copy(uri,'uri')}>
+                <div className="ul">📥 URI для Olcbox {copied==='uri'?'— Скопировано!':'(нажмите)'}</div>
+                <div className="uv">{uri}</div>
+              </div>
+            )}
+
+            <div style={{marginTop:12,padding:10,background:'rgba(0,0,0,.15)',borderRadius:8}}>
+              <div style={{fontSize:11,color:'var(--muted)',marginBottom:4}}>📥 Скачайте Olcbox:</div>
+              <a href="https://github.com/alananisimov/olcbox/releases" target="_blank" rel="noreferrer" style={{fontSize:12,color:'var(--blue)'}}>github.com/alananisimov/olcbox/releases</a>
             </div>
           </div>
-        </>
-      )}
+        )}
+
+        {/* Actions */}
+        <div className="card">
+          <div className="ct">🛠 Управление</div>
+          <div className="brow">
+            <button className="btn bs bb" onClick={()=>{setInstallMode('reconfig');setPage('install');setError(null);setSuccess(null);}}>⚙️ Изменить настройки</button>
+            <button className="btn bs br" disabled={loading} onClick={()=>{if(window.confirm('Полностью удалить OlcRTC?'))doAction('uninstall')}}>🗑 Удалить</button>
+          </div>
+        </div>
+      </>)}
     </div>
   );
 }
