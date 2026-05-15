@@ -337,18 +337,21 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
         </div>
 
         {cfg.S_PROVIDER && <div className="card">
-          <div className="ct" style={{flexWrap:'wrap',gap:'8px'}}>⚙️ Конфигурация <span className={`prov-badge ${cfg.S_PROVIDER==='telemost'?'yandex':''}`} style={{background:PCOLORS[cfg.S_PROVIDER]||'#666'}}>{PLABELS[cfg.S_PROVIDER]||cfg.S_PROVIDER}</span>{getInviteLink() && <a href={getInviteLink()} target="_blank" rel="noreferrer" className="join-btn">🌐 Войти в конференцию</a>}</div>
+          <div className="ct" style={{justifyContent:'center',flexWrap:'wrap',gap:'8px'}}>⚙️ Конфигурация <span className={`prov-badge ${cfg.S_PROVIDER==='telemost'?'yandex':''}`} style={{background:PCOLORS[cfg.S_PROVIDER]||'#666'}}>{PLABELS[cfg.S_PROVIDER]||cfg.S_PROVIDER}</span></div>
+          {getInviteLink() && <div style={{textAlign:'center',marginBottom:12}}><a href={getInviteLink()} target="_blank" rel="noreferrer" className="join-btn">🌐 Войти в конференцию</a></div>}
           <div className="cg">
             {[['Провайдер',PLABELS[cfg.S_PROVIDER]||cfg.S_PROVIDER],['Транспорт',cfg.S_TRANSPORT],['ID звонка',cfg.S_ROOM_ID],['Ключ шифрования',cfg.S_ENC_KEY],['ID клиента',cfg.S_CLIENT_ID]].map(([l,v])=>
               <div className="ci" key={l} onClick={()=>copy(v,l)}><span className="cl">{l}</span><span className="cv">{v}</span><span className={`toast ${copied===l?'show':''}`}>✓ Скопировано</span></div>
             )}
             {cfg.S_BOT_NAME && <div className="ci" onClick={()=>copy(cfg.S_BOT_NAME,'bot')}><span className="cl">Имя бота</span><span className="cv">{cfg.S_BOT_NAME}</span><span className={`toast ${copied==='bot'?'show':''}`}>✓ Скопировано</span></div>}
           </div>
-          {uri && <div className={`ub ${copied==='uri'?'copied-uri':''}`} onClick={()=>copy(uri,'uri')}>
-            <div className="toast-uri">✓ Скопировано в буфер!</div>
-            <div className="ul">📥 URI для Olcbox (нажмите для копирования)</div>
-            <div className="uv">{uri}</div>
-          </div>}
+          {uri && <>
+            <div className="ul" style={{marginTop:14,textAlign:'center'}}>📥 URI для Olcbox (нажмите для копирования)</div>
+            <div className={`ub ${copied==='uri'?'copied-uri':''}`} onClick={()=>copy(uri,'uri')} style={{marginTop:4}}>
+              <div className="toast-uri">✓ Скопировано в буфер!</div>
+              <div className="uv">{uri}</div>
+            </div>
+          </>}
           <div style={{marginTop:10,padding:8,background:'var(--ibg)',borderRadius:8}}>
             <div style={{fontSize:11,color:'var(--muted)',marginBottom:3}}>📥 Olcbox:</div>
             <a href="https://github.com/alananisimov/olcbox/releases" target="_blank" rel="noreferrer" style={{fontSize:12,color:'var(--accent)'}}>github.com/alananisimov/olcbox/releases</a>
