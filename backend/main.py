@@ -29,32 +29,34 @@ def create_ipv4_socket(hostname, port):
     """Создаёт сокет с принудительным IPv4 (Railway может использовать IPv6 по умолчанию)."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(SSH_TIMEOUT)
-    sock.connect((hostname, port))
+    sock.connect((hostname, int(port)))
     return sock
 
 
-def ssh_connect(ip, username, password, timeout=SSH_TIMEOUT):
+def ssh_connect(ip, username, password, port=22, timeout=SSH_TIMEOUT):
     """Подключение SSH с принудительным IPv4."""
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     
-    logger.info(f"Попытка SSH подключения к {ip}:22 (IPv4, таймаут {timeout}с)")
+    port = int(port)
+    logger.info(f"Попытка SSH подключения к {ip}:{port} (IPv4, таймаут {timeout}с)")
     
     try:
         # Принудительно используем IPv4-сокет
-        sock = create_ipv4_socket(ip, 22)
-        logger.info(f"TCP соединение с {ip}:22 установлено, запускаем SSH-хэндшейк")
+        sock = create_ipv4_socket(ip, port)
+        logger.info(f"TCP соединение с {ip}:{port} установлено, запускаем SSH-хэндшейк")
         
         ssh.connect(
             hostname=ip,
             username=username,
             password=password,
+            port=port,
             timeout=timeout,
             sock=sock,
             look_for_keys=False,
             allow_agent=False
         )
-        logger.info(f"SSH подключение к {ip} успешно")
+        logger.info(f"SSH подключение к {ip}:{port} успешно")
         return ssh
     except Exception:
         ssh.close()
@@ -64,23 +66,24 @@ def ssh_connect(ip, username, password, timeout=SSH_TIMEOUT):
 @app.post("/api/verify_ssh")
 def verify_ssh(
     ip: str = Form(...),
+    port: int = Form(22),
     username: str = Form(...),
     password: str = Form(...)
 ):
     try:
-        ssh = ssh_connect(ip, username, password)
+        ssh = ssh_connect(ip, username, password, port=port)
         ssh.close()
         return {"success": True}
     except paramiko.AuthenticationException:
         return {"success": False, "error": "Неверный логин или пароль."}
     except socket.timeout:
-        return {"success": False, "error": f"Таймаут при подключении к {ip}:22. Сервер не отвечает (порт 22 недоступен из облака)."}
+        return {"success": False, "error": f"Таймаут при подключении к {ip}:{port}. Сервер не отвечает (порт недоступен из облака)."}
     except ConnectionRefusedError:
-        return {"success": False, "error": f"Соединение отклонено {ip}:22. SSH-сервер не запущен или порт закрыт."}
+        return {"success": False, "error": f"Соединение отклонено {ip}:{port}. SSH-сервер не запущен или порт закрыт."}
     except OSError as e:
-        return {"success": False, "error": f"Сетевая ошибка при подключении к {ip}: {str(e)}"}
+        return {"success": False, "error": f"Сетевая ошибка при подключении к {ip}:{port}: {str(e)}"}
     except Exception as e:
-        logger.error(f"SSH ошибка для {ip}: {type(e).__name__}: {e}")
+        logger.error(f"SSH ошибка для {ip}:{port}: {type(e).__name__}: {e}")
         return {"success": False, "error": f"Не удалось подключиться: {type(e).__name__}: {str(e)}"}
 
 
@@ -131,9 +134,9 @@ def diagnose_connectivity(ip: str):
     return results
 
 
-def run_ssh_install(ip, username, password, provider, transport, room, bot_name):
+def run_ssh_install(ip, username, password, port, provider, transport, room, bot_name):
     try:
-        ssh = ssh_connect(ip, username, password)
+        ssh = ssh_connect(ip, username, password, port=port)
         
         ssh.exec_command("wget -qO install.sh 'https://raw.githubusercontent.com/Andreyleluk-GAS/LE-Olcrtc/main/install-olcrtc.sh' && chmod +x install.sh")
         time.sleep(2)
@@ -158,6 +161,7 @@ def run_ssh_install(ip, username, password, provider, transport, room, bot_name)
 @app.post("/api/install")
 def install_bot(
     ip: str = Form(...),
+    port: int = Form(22),
     username: str = Form(...),
     password: str = Form(...),
     provider: str = Form(...),
@@ -165,7 +169,7 @@ def install_bot(
     room: str = Form(...),
     bot_name: str = Form(...)
 ):
-    success, error = run_ssh_install(ip, username, password, provider, transport, room, bot_name)
+    success, error = run_ssh_install(ip, username, password, port, provider, transport, room, bot_name)
     
     if success:
         return {"success": True, "link": room}

@@ -6,7 +6,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
   
-  const [sshData, setSshData] = useState({ ip: '', username: 'root', password: '' });
+  const [sshData, setSshData] = useState({ ip: '', port: '22', username: 'root', password: '' });
 
   const handleVerifySSH = async (e) => {
     e.preventDefault();
@@ -44,6 +44,7 @@ export default function App() {
 
     const formData = new FormData(e.target);
     formData.append('ip', sshData.ip);
+    formData.append('port', sshData.port);
     formData.append('username', sshData.username);
     formData.append('password', sshData.password);
 
@@ -90,6 +91,9 @@ export default function App() {
         .form-group { margin-bottom: 20px; }
         .form-label { display: block; font-size: 14px; font-weight: 500; color: var(--text-muted); margin-bottom: 8px; }
         .form-input, .form-select { width: 100%; padding: 14px 16px; background-color: var(--input-bg); border: 1px solid var(--input-border); border-radius: 12px; color: var(--text-main); font-size: 16px; box-sizing: border-box; transition: all 0.2s ease; outline: none; }
+        .ip-port-row { display: flex; gap: 12px; }
+        .ip-port-row .ip-field { flex: 1; }
+        .ip-port-row .port-field { width: 100px; }
         .form-input:focus, .form-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2); }
         .submit-btn { width: 100%; padding: 16px; background-color: var(--accent); color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; transition: 0.2s; margin-top: 10px; }
         .submit-btn:hover:not(:disabled) { background-color: var(--accent-hover); }
@@ -115,8 +119,15 @@ export default function App() {
 
             <form onSubmit={handleVerifySSH}>
               <div className="form-group">
-                <label className="form-label">IP-адрес сервера</label>
-                <input type="text" name="ip" className="form-input" required placeholder="185.65.x.x" defaultValue={sshData.ip} />
+                <label className="form-label">IP-адрес сервера и порт SSH</label>
+                <div className="ip-port-row">
+                  <div className="ip-field">
+                    <input type="text" name="ip" className="form-input" required placeholder="185.65.x.x" defaultValue={sshData.ip} />
+                  </div>
+                  <div className="port-field">
+                    <input type="number" name="port" className="form-input" required placeholder="22" defaultValue={sshData.port} min="1" max="65535" />
+                  </div>
+                </div>
               </div>
               <div className="form-group">
                 <label className="form-label">Пользователь SSH</label>
