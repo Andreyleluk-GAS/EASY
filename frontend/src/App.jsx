@@ -52,7 +52,14 @@ export default function App() {
     } catch { setError('Ошибка сети'); } finally { setLoading(false); }
   };
 
-  const copy = (t,l) => { navigator.clipboard.writeText(t); setCopied(l); setTimeout(()=>setCopied(''),1500); };
+  const copy = (t,l) => { navigator.clipboard.writeText(t); setCopied(l); setTimeout(()=>setCopied(''),2000); };
+
+  // Ссылка на конференцию из сохранённого конфига
+  const getInviteLink = () => {
+    if (!cfg.S_PROVIDER || !cfg.S_ROOM_ID) return '';
+    const links = { telemost:`https://telemost.yandex.ru/j/${cfg.S_ROOM_ID}`, wbstream:`https://stream.wb.ru/room/${cfg.S_ROOM_ID}`, jazz:`https://salutejazz.ru/calls/${cfg.S_ROOM_ID}` };
+    return links[cfg.S_PROVIDER] || '';
+  };
   const clearFields = () => { setRoom(''); setEncKey(''); setClientId(''); setBotName(''); };
   const onProvChange = (v) => { setProv(v); setRoom(''); setEncKey(''); setClientId(''); setBotName(''); };
 
@@ -95,12 +102,14 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .dot.off{background:var(--red);box-shadow:0 0 4px rgba(239,68,68,.3)}
 @keyframes p{0%,100%{opacity:1}50%{opacity:.5}}
 .cg{display:grid;gap:5px}
-.ci{display:flex;justify-content:space-between;align-items:center;padding:9px 14px;background:var(--ibg);border-radius:8px;font-size:14px;cursor:pointer;transition:.1s;position:relative}
+.ci{display:flex;justify-content:space-between;align-items:center;padding:9px 14px;background:var(--ibg);border-radius:8px;font-size:14px;cursor:pointer;transition:.1s;position:relative;overflow:visible}
 .ci:hover{background:#e0f2fe}
-.ci:active .toast{opacity:1;transform:translateY(0)}
 .cl{color:var(--muted);font-size:13px}
 .cv{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--accent);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.toast{position:absolute;top:-28px;right:10px;background:#1e293b;color:#fff;padding:3px 10px;border-radius:6px;font-size:11px;opacity:0;transform:translateY(4px);transition:.2s;pointer-events:none}
+.toast{position:absolute;top:-30px;right:10px;background:#1e293b;color:#22c55e;padding:4px 12px;border-radius:7px;font-size:12px;font-weight:500;opacity:0;transform:translateY(6px);transition:.25s;pointer-events:none;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.15)}
+.toast.show{opacity:1;transform:translateY(0)}
+.join-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:linear-gradient(135deg,rgba(14,165,233,.1),rgba(139,92,246,.1));border:1px solid rgba(14,165,233,.25);border-radius:8px;color:var(--accent);font-size:12px;font-weight:500;cursor:pointer;transition:.15s;text-decoration:none;font-family:'Inter',sans-serif;margin-left:auto}
+.join-btn:hover{background:linear-gradient(135deg,rgba(14,165,233,.2),rgba(139,92,246,.18));border-color:rgba(14,165,233,.4);transform:translateY(-1px);box-shadow:0 2px 8px rgba(14,165,233,.15)}
 .ub{margin-top:12px;padding:14px;background:#f0f0ff;border:1px solid #e0e0ff;border-radius:10px;cursor:pointer;transition:.15s;position:relative}
 .ub:hover{background:#e8e8ff;border-color:#c7c7ff}
 .ub .toast-uri{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:#1e293b;color:#22c55e;padding:8px 20px;border-radius:10px;font-size:14px;font-weight:600;opacity:0;transition:.2s;pointer-events:none;z-index:2}
@@ -277,12 +286,12 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
         </div>
 
         {cfg.S_PROVIDER && <div className="card">
-          <div className="ct">⚙️ Конфигурация <span className={`prov-badge ${cfg.S_PROVIDER==='telemost'?'yandex':''}`} style={{background:PCOLORS[cfg.S_PROVIDER]||'#666'}}>{PLABELS[cfg.S_PROVIDER]||cfg.S_PROVIDER}</span></div>
+          <div className="ct" style={{flexWrap:'wrap',gap:'8px'}}>⚙️ Конфигурация <span className={`prov-badge ${cfg.S_PROVIDER==='telemost'?'yandex':''}`} style={{background:PCOLORS[cfg.S_PROVIDER]||'#666'}}>{PLABELS[cfg.S_PROVIDER]||cfg.S_PROVIDER}</span>{getInviteLink() && <a href={getInviteLink()} target="_blank" rel="noreferrer" className="join-btn">🌐 Войти в конференцию</a>}</div>
           <div className="cg">
             {[['Провайдер',PLABELS[cfg.S_PROVIDER]||cfg.S_PROVIDER],['Транспорт',cfg.S_TRANSPORT],['ID звонка',cfg.S_ROOM_ID],['Ключ шифрования',cfg.S_ENC_KEY],['ID клиента',cfg.S_CLIENT_ID]].map(([l,v])=>
-              <div className="ci" key={l} onClick={()=>copy(v,l)}><span className="cl">{l}</span><span className="cv">{v}</span><span className="toast">{copied===l?'✓ Скопировано':''}</span></div>
+              <div className="ci" key={l} onClick={()=>copy(v,l)}><span className="cl">{l}</span><span className="cv">{v}</span><span className={`toast ${copied===l?'show':''}`}>✓ Скопировано</span></div>
             )}
-            {cfg.S_BOT_NAME && <div className="ci" onClick={()=>copy(cfg.S_BOT_NAME,'bot')}><span className="cl">Имя бота</span><span className="cv">{cfg.S_BOT_NAME}</span><span className="toast">{copied==='bot'?'✓ Скопировано':''}</span></div>}
+            {cfg.S_BOT_NAME && <div className="ci" onClick={()=>copy(cfg.S_BOT_NAME,'bot')}><span className="cl">Имя бота</span><span className="cv">{cfg.S_BOT_NAME}</span><span className={`toast ${copied==='bot'?'show':''}`}>✓ Скопировано</span></div>}
           </div>
           {uri && <div className={`ub ${copied==='uri'?'copied-uri':''}`} onClick={()=>copy(uri,'uri')}>
             <div className="toast-uri">✓ Скопировано в буфер!</div>
