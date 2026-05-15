@@ -24,9 +24,9 @@ export default function App() {
   const [showLogs, setShowLogs] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [provTransports, setProvTransports] = useState({});
-  const [selProvider, setSelProvider] = useState('jazz');
+  const [selProvider, setSelProvider] = useState('telemost');
   const [copied, setCopied] = useState('');
-  const [installMode, setInstallMode] = useState('full'); // full, reconfig, update
+  const [installMode, setInstallMode] = useState('full');
   const logsRef = useRef(null);
 
   useEffect(() => { fetchStatus(); fetchTransports(); }, []);
@@ -36,8 +36,8 @@ export default function App() {
       const r = await fetch('/api/status');
       const d = await r.json();
       setStatus(d);
-      setPage(d.installed && d.config ? 'dashboard' : 'install');
-    } catch { setPage('install'); }
+      setPage('menu');
+    } catch { setPage('menu'); }
   };
 
   const fetchTransports = async () => {
@@ -80,7 +80,7 @@ export default function App() {
       if (d.success) {
         const msgs = { stop: 'Остановлен', start: 'Запущен', restart: 'Перезапущен', uninstall: 'Удалён', update_binary: 'Обновлён' };
         setSuccess(msgs[action] || 'Готово');
-        if (action === 'uninstall') { setPage('install'); }
+        if (action === 'uninstall') { setPage('menu'); }
         await fetchStatus();
       } else { setError(d.error || 'Ошибка'); }
     } catch { setError('Ошибка сети'); }
@@ -104,13 +104,18 @@ export default function App() {
 :root{--bg:#0a0e1a;--card:#111827;--text:#f1f5f9;--muted:#64748b;--accent:#10b981;--ah:#059669;--blue:#3b82f6;--red:#ef4444;--yellow:#f59e0b;--purple:#8b5cf6;--border:rgba(255,255,255,.06);--ibg:#1e293b;--ib:#334155}
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
-.root{max-width:700px;margin:0 auto;padding:20px 14px}
+.root{width:100%;max-width:700px;min-width:0;margin:0 auto;padding:20px 14px}
 .hdr{text-align:center;padding:28px 0 20px}
 .logo{font-size:30px;font-weight:700;background:linear-gradient(135deg,#10b981,#3b82f6);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .sub{color:var(--muted);font-size:13px;margin-top:3px}
 .chip{display:inline-block;margin-top:8px;padding:3px 12px;background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.2);border-radius:16px;font-size:11px;color:var(--accent);font-family:'JetBrains Mono',monospace}
 .sysinfo{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:6px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:24px;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:24px;margin-bottom:14px;width:100%}
+.menu-item{display:flex;align-items:center;gap:12px;padding:14px 18px;background:rgba(0,0,0,.15);border:1px solid var(--border);border-radius:12px;margin-bottom:8px;cursor:pointer;transition:.2s;font-size:14px;font-weight:500}
+.menu-item:hover{background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.2)}
+.menu-item .mi-icon{font-size:20px;width:32px;text-align:center}
+.menu-item .mi-desc{font-size:11px;color:var(--muted);font-weight:400;margin-top:2px}
+.menu-sep{border:none;border-top:1px solid var(--border);margin:12px 0}
 .ct{font-size:17px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px}
 .sr{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:rgba(0,0,0,.2);border-radius:10px;margin-bottom:10px}
 .dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:7px}
@@ -180,6 +185,46 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 
       {page === 'loading' && <div className="ip"><div className="spinner"/><div style={{color:'var(--accent)',fontWeight:500}}>Загрузка...</div></div>}
 
+      {/* ══════ MAIN MENU ══════ */}
+      {page === 'menu' && (
+        <div className="card">
+          <div className="ct">📋 Главное меню</div>
+          <div className="menu-item" onClick={() => { setInstallMode(status?.installed ? 'reconfig' : 'full'); setPage('install'); setError(null); setSuccess(null); }}>
+            <span className="mi-icon">🚀</span>
+            <div><div>{status?.installed ? 'Настроить OlcRTC' : 'Установить OlcRTC'}</div><div className="mi-desc">{status?.installed ? 'Изменить конфигурацию или переустановить' : 'Полная установка и настройка'}</div></div>
+          </div>
+          {status?.installed && (<>
+            <div className="menu-item" onClick={() => { setPage('dashboard'); setError(null); setSuccess(null); }}>
+              <span className="mi-icon">📊</span>
+              <div><div>Статус и реквизиты</div><div className="mi-desc">Посмотреть конфигурацию, URI, ключи</div></div>
+            </div>
+            <div className="menu-item" onClick={() => { setShowLogs(true); fetchLogs(); setPage('logs'); setError(null); }}>
+              <span className="mi-icon">📋</span>
+              <div><div>Логи сервера</div><div className="mi-desc">Просмотр журнала работы OlcRTC</div></div>
+            </div>
+            <hr className="menu-sep"/>
+            <div className="menu-item" onClick={() => { if(window.confirm('Полностью удалить OlcRTC?')) doAction('uninstall'); }}>
+              <span className="mi-icon">🗑</span>
+              <div><div style={{color:'var(--red)'}}>Удалить OlcRTC</div><div className="mi-desc">Остановить и удалить все файлы</div></div>
+            </div>
+          </>)}
+        </div>
+      )}
+
+      {/* ══════ LOGS PAGE ══════ */}
+      {page === 'logs' && (
+        <div className="card">
+          <div className="ct">📋 Логи сервера</div>
+          <div className="brow" style={{marginBottom:10}}>
+            <button className="btn bs bb" onClick={fetchLogs}>🔄 Обновить</button>
+            <button className="btn bs" style={{background:'transparent',border:'1px solid var(--ib)',color:'var(--muted)'}} onClick={() => setPage('menu')}>← Меню</button>
+          </div>
+          <div className="lc" ref={logsRef} style={{maxHeight:500}}>
+            <pre className="lt">{logs || 'Загрузка...'}</pre>
+          </div>
+        </div>
+      )}
+
       {/* ══════ INSTALL / RECONFIG ══════ */}
       {page === 'install' && !installing && (
         <div className="card">
@@ -197,9 +242,9 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
             <div className="fg">
               <label className="fl">Провайдер</label>
               <select name="provider" className="fs" value={selProvider} onChange={e => setSelProvider(e.target.value)}>
-                <option value="jazz">Sber SaluteJazz</option>
-                <option value="telemost">Yandex Telemost</option>
-                <option value="wbstream">WB Stream</option>
+                <option value="telemost">Yandex Telemost — стабильно работает</option>
+                <option value="wbstream">WB Stream — стабильно работает</option>
+                <option value="jazz">Sber SaluteJazz — работает нестабильно</option>
               </select>
             </div>
 
@@ -258,8 +303,8 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
             </button>
 
             {status?.installed && (
-              <button type="button" className="btn bp" style={{marginTop:8,background:'transparent',border:'1px solid var(--ib)',color:'var(--muted)'}} onClick={() => { setPage('dashboard'); setError(null); setSuccess(null); }}>
-                ← Назад к панели
+              <button type="button" className="btn bp" style={{marginTop:8,background:'transparent',border:'1px solid var(--ib)',color:'var(--muted)'}} onClick={() => { setPage('menu'); setError(null); setSuccess(null); }}>
+                ← Назад в меню
               </button>
             )}
           </form>
@@ -363,6 +408,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
           <div className="brow">
             <button className="btn bs bb" onClick={()=>{setInstallMode('reconfig');setPage('install');setError(null);setSuccess(null);}}>⚙️ Изменить настройки</button>
             <button className="btn bs br" disabled={loading} onClick={()=>{if(window.confirm('Полностью удалить OlcRTC?'))doAction('uninstall')}}>🗑 Удалить</button>
+            <button className="btn bs" style={{background:'transparent',border:'1px solid var(--ib)',color:'var(--muted)'}} onClick={()=>setPage('menu')}>← Меню</button>
           </div>
         </div>
       </>)}
