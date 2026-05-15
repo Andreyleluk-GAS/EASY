@@ -38,16 +38,17 @@ export default function App() {
     try { const r = await fetch('/api/logs?lines=100'); const d = await r.json(); setLogs(d.logs||d.error||''); setTimeout(()=>{if(logsRef.current)logsRef.current.scrollTop=logsRef.current.scrollHeight;},50); } catch { setLogs('Ошибка'); }
   };
 
-  const execCmd = async () => {
-    if(!cmdInput.trim()||cmdRunning) return;
+  const execCmd = async (directCmd) => {
+    const cmd = directCmd || cmdInput;
+    if(!cmd.trim()||cmdRunning) return;
     setCmdRunning(true);
-    const prev = cmdOutput;
-    setCmdOutput(prev + `\n$ ${cmdInput}\n`);
-    const cmd = cmdInput; setCmdInput('');
+    const host = status?.server_ip || 'server';
+    setCmdOutput(o => o + `\nroot@${host}:~# ${cmd}\n`);
+    setCmdInput('');
     try {
       const fd = new FormData(); fd.append('command', cmd);
       const r = await fetch('/api/exec',{method:'POST',body:fd}); const d = await r.json();
-      setCmdOutput(o => o + (d.stdout||'') + (d.stderr ? `\n⚠️ ${d.stderr}` : '') + '\n');
+      setCmdOutput(o => o + (d.stdout||'') + (d.stderr ? d.stderr : '') + '\n');
     } catch { setCmdOutput(o => o + 'Ошибка сети\n'); }
     finally { setCmdRunning(false); setTimeout(()=>{if(cmdRef.current)cmdRef.current.scrollTop=cmdRef.current.scrollHeight;},50); }
   };
@@ -236,17 +237,25 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 
       {/* ══ CONSOLE ══ */}
       {page==='console' && <div className="card">
-        <div className="ct">🖥️ Консоль</div>
+        <div className="ct">🖥️ Консоль сервера</div>
         <div className="brow" style={{marginBottom:10}}>
           <button className="btn bs by" onClick={()=>setCmdOutput('')}>🧹 Очистить</button>
           <button className="btn bs bghost" onClick={()=>setPage('menu')}>← Меню</button>
         </div>
-        <div className="lc" ref={cmdRef} style={{maxHeight:400,minHeight:150}}>
-          <pre className="lt">{cmdOutput || 'Введите команду ниже...'}</pre>
+        <div className="lc" ref={cmdRef} style={{maxHeight:'70vh',minHeight:350}}>
+          <pre className="lt">{cmdOutput || `root@${status?.server_ip||'server'}:~# Готов к работе.\nВведите команду ниже и нажмите Enter или выберите быструю команду.\n`}</pre>
+          {cmdRunning && <div style={{color:'#22c55e',fontFamily:'JetBrains Mono,monospace',fontSize:11,marginTop:4}}>⏳ Выполняется...</div>}
         </div>
         <div className="con-input">
-          <input value={cmdInput} onChange={e=>setCmdInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')execCmd();}} placeholder="Введите команду..." disabled={cmdRunning}/>
-          <button onClick={execCmd} disabled={cmdRunning}>{cmdRunning?'◷':'>'} Выполнить</button>
+          <input value={cmdInput} onChange={e=>setCmdInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')execCmd();}} placeholder={`root@${status?.server_ip||'server'}:~#`} disabled={cmdRunning}/>
+          <button onClick={execCmd} disabled={cmdRunning}>{cmdRunning?'◷':'▶'}</button>
+        </div>
+        <div style={{marginTop:10}}>
+          <div style={{fontSize:12,color:'var(--muted)',marginBottom:6,fontWeight:500}}>⚡ Быстрые команды:</div>
+          <div className="brow">
+            <button className="btn bs bb" disabled={cmdRunning} onClick={()=>execCmd('systemctl status olcrtc-panel')}>📊 Статус панели</button>
+            <button className="btn bs by" disabled={cmdRunning} onClick={()=>execCmd('systemctl restart olcrtc-panel')}>🔄 Перезапуск панели</button>
+          </div>
         </div>
       </div>}
 
