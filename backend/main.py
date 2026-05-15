@@ -400,6 +400,14 @@ def api_uninstall(remove_go: bool = False, remove_swap: bool = False):
     return {"success": True}
 
 
+@app.post("/api/exec")
+def api_exec(command: str = Form(...)):
+    """Выполняет произвольную команду на сервере (для опытных пользователей)."""
+    logger.info(f"Console exec: {command[:100]}")
+    ok, stdout, stderr = run_cmd(command, timeout=30)
+    return {"success": ok, "stdout": stdout, "stderr": stderr}
+
+
 # ── Фронтенд ──
 frontend_dist = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 if os.path.exists(frontend_dist):

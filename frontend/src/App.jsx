@@ -21,7 +21,11 @@ export default function App() {
   const [clientId, setClientId] = useState('');
   const [botName, setBotName] = useState('');
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [cmdInput, setCmdInput] = useState('');
+  const [cmdOutput, setCmdOutput] = useState('');
+  const [cmdRunning, setCmdRunning] = useState(false);
   const logsRef = useRef(null);
+  const cmdRef = useRef(null);
 
   useEffect(() => { load(); fetch('/api/provider_transports').then(r=>r.json()).then(setPt).catch(()=>{}); }, []);
 
@@ -32,6 +36,20 @@ export default function App() {
 
   const getLogs = async () => {
     try { const r = await fetch('/api/logs?lines=100'); const d = await r.json(); setLogs(d.logs||d.error||''); setTimeout(()=>{if(logsRef.current)logsRef.current.scrollTop=logsRef.current.scrollHeight;},50); } catch { setLogs('Ошибка'); }
+  };
+
+  const execCmd = async () => {
+    if(!cmdInput.trim()||cmdRunning) return;
+    setCmdRunning(true);
+    const prev = cmdOutput;
+    setCmdOutput(prev + `\n$ ${cmdInput}\n`);
+    const cmd = cmdInput; setCmdInput('');
+    try {
+      const fd = new FormData(); fd.append('command', cmd);
+      const r = await fetch('/api/exec',{method:'POST',body:fd}); const d = await r.json();
+      setCmdOutput(o => o + (d.stdout||'') + (d.stderr ? `\n⚠️ ${d.stderr}` : '') + '\n');
+    } catch { setCmdOutput(o => o + 'Ошибка сети\n'); }
+    finally { setCmdRunning(false); setTimeout(()=>{if(cmdRef.current)cmdRef.current.scrollTop=cmdRef.current.scrollHeight;},50); }
   };
 
   const handleInstall = async (e) => {
@@ -93,7 +111,8 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .ct{font-size:18px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px}
 .mi{display:flex;align-items:center;gap:14px;padding:15px 18px;background:var(--ibg);border:1px solid var(--border);border-radius:12px;margin-bottom:8px;cursor:pointer;transition:.15s;font-size:15px;font-weight:500}
 .mi:hover{background:#e0f2fe;border-color:#bae6fd;transform:translateX(2px)}
-.mi .ic{font-size:22px;width:36px;min-width:36px;text-align:center;flex-shrink:0}
+.mi .ic{font-size:22px;width:40px;min-width:40px;text-align:center;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.mi .mt{flex:1;min-width:0}
 .mi .ds{font-size:12px;color:var(--muted);font-weight:400;margin-top:2px}
 .sep{border:none;border-top:1px solid var(--border);margin:10px 0}
 .sr{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--ibg);border-radius:10px;margin-bottom:10px}
@@ -156,7 +175,11 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .clear-row{display:flex;justify-content:flex-end;margin-bottom:8px}
 .clear-btn{background:none;border:1px solid var(--ib);padding:5px 12px;border-radius:8px;font-size:11px;color:var(--muted);cursor:pointer;font-family:'Inter',sans-serif;transition:.15s}
 .clear-btn:hover{background:#fee2e2;border-color:#fecaca;color:#dc2626}
-@media(max-width:480px){.root{padding:14px 10px}.card{padding:18px 14px}.brow{flex-direction:column}.cv{max-width:150px}}
+.con-input{display:flex;gap:6px;margin-top:10px}
+.con-input input{flex:1;padding:10px 12px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#c9d1d9;font-family:'JetBrains Mono',monospace;font-size:13px;outline:none}
+.con-input input:focus{border-color:var(--accent)}
+.con-input button{padding:8px 16px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+@media(max-width:480px){.root{padding:10px 8px}.card{padding:16px 12px}.brow{flex-direction:column}.brow .btn{width:100%}.cv{max-width:140px}.ct{font-size:16px;flex-wrap:wrap}.join-btn{width:100%;justify-content:center;margin-left:0;margin-top:4px}.sr{flex-direction:column;gap:6px;align-items:flex-start}.prov-badge{margin-left:0}}
       `}</style>
 
       <div className="hdr">
@@ -179,21 +202,24 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
         <div className="ct">📋 Главное меню</div>
         <div className="mi" onClick={()=>{setMode(status?.installed?'reconfig':'full');setPage('install');setError(null);setSuccess(null);clearFields();}}>
           <span className="ic">🚀</span>
-          <div><div>{status?.installed?'Настроить OlcRTC':'Установить OlcRTC'}</div><div className="ds">{status?.installed?'Изменить конфигурацию или переустановить':'Полная установка и настройка'}</div></div>
+          <div className="mt"><div>{status?.installed?'Настроить OlcRTC':'Установить OlcRTC'}</div><div className="ds">{status?.installed?'Изменить конфигурацию или переустановить':'Полная установка и настройка'}</div></div>
         </div>
         {status?.installed && <>
           <div className="mi" onClick={()=>{setPage('dashboard');setError(null);setSuccess(null);}}>
-            <span className="ic">📊</span><div><div>Статус и реквизиты</div><div className="ds">Конфигурация, URI, ключи</div></div>
+            <span className="ic">📊</span><div className="mt"><div>Статус и реквизиты</div><div className="ds">Конфигурация, URI, ключи</div></div>
           </div>
           <div className="mi" onClick={()=>{getLogs();setPage('logs');setError(null);}}>
-            <span className="ic">📋</span><div><div>Логи сервера</div><div className="ds">Журнал работы OlcRTC</div></div>
+            <span className="ic">📋</span><div className="mt"><div>Логи сервера</div><div className="ds">Журнал работы OlcRTC</div></div>
           </div>
           <div className="mi" onClick={checkUpdate} style={{opacity:checkingUpdate?.5:1}}>
-            <span className="ic">🔄</span><div><div>Проверить обновления</div><div className="ds">{checkingUpdate?'Проверяем...':'Обновить ядро OlcRTC без удаления настроек'}</div></div>
+            <span className="ic">🔄</span><div className="mt"><div>Проверить обновления</div><div className="ds">{checkingUpdate?'Проверяем...':'Обновить ядро OlcRTC без удаления настроек'}</div></div>
+          </div>
+          <div className="mi" onClick={()=>{setCmdOutput('');setPage('console');setError(null);}}>
+            <span className="ic">🖥️</span><div className="mt"><div>Консоль</div><div className="ds">Выполнить команду на сервере</div></div>
           </div>
           <hr className="sep"/>
           <div className="mi" onClick={()=>{if(window.confirm('Полностью удалить OlcRTC?'))act('uninstall');}}>
-            <span className="ic">🗑</span><div><div style={{color:'var(--red)'}}>Удалить OlcRTC</div><div className="ds">Остановить и удалить все файлы</div></div>
+            <span className="ic">🗑</span><div className="mt"><div style={{color:'var(--red)'}}>Удалить OlcRTC</div><div className="ds">Остановить и удалить все файлы</div></div>
           </div>
         </>}
       </div>}
@@ -206,6 +232,22 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
           <button className="btn bs bghost" onClick={()=>setPage('menu')}>← Меню</button>
         </div>
         <div className="lc" ref={logsRef} style={{maxHeight:500}}><pre className="lt">{logs||'Загрузка...'}</pre></div>
+      </div>}
+
+      {/* ══ CONSOLE ══ */}
+      {page==='console' && <div className="card">
+        <div className="ct">🖥️ Консоль</div>
+        <div className="brow" style={{marginBottom:10}}>
+          <button className="btn bs by" onClick={()=>setCmdOutput('')}>🧹 Очистить</button>
+          <button className="btn bs bghost" onClick={()=>setPage('menu')}>← Меню</button>
+        </div>
+        <div className="lc" ref={cmdRef} style={{maxHeight:400,minHeight:150}}>
+          <pre className="lt">{cmdOutput || 'Введите команду ниже...'}</pre>
+        </div>
+        <div className="con-input">
+          <input value={cmdInput} onChange={e=>setCmdInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')execCmd();}} placeholder="Введите команду..." disabled={cmdRunning}/>
+          <button onClick={execCmd} disabled={cmdRunning}>{cmdRunning?'◷':'>'} Выполнить</button>
+        </div>
       </div>}
 
       {/* ══ INSTALL ══ */}
