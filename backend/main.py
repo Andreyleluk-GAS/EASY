@@ -1,14 +1,14 @@
-import paramiko
-import time
+import subprocess
 import os
-import socket
+import time
 import logging
+import shutil
 from fastapi import FastAPI, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
-# Настраиваем логирование для отладки
+# Настраиваем логирование
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -16,212 +16,350 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-SSH_TIMEOUT = 20  # секунд — увеличен для облачных сред
+# ==========================================
+# Утилиты
+# ==========================================
+
+ENV_FILE = "/opt/olcrtc/.env"
+SERVICE_FILE = "/etc/systemd/system/olcrtc.service"
+BINARY_PATH = "/opt/olcrtc/olcrtc"
+INSTALL_SCRIPT_URL = "https://raw.githubusercontent.com/Andreyleluk-GAS/LE-Olcrtc/main/install-olcrtc.sh"
 
 
-def create_ipv4_socket(hostname, port):
-    """Создаёт сокет с принудительным IPv4 (Railway может использовать IPv6 по умолчанию)."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(SSH_TIMEOUT)
-    sock.connect((hostname, int(port)))
-    return sock
-
-
-def ssh_connect(ip, username, password, port=22, timeout=SSH_TIMEOUT):
-    """Подключение SSH с принудительным IPv4."""
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    
-    port = int(port)
-    logger.info(f"Попытка SSH подключения к {ip}:{port} (IPv4, таймаут {timeout}с)")
-    
+def run_cmd(cmd, timeout=600):
+    """Выполняет команду локально и возвращает (success, stdout, stderr)."""
     try:
-        # Принудительно используем IPv4-сокет
-        sock = create_ipv4_socket(ip, port)
-        logger.info(f"TCP соединение с {ip}:{port} установлено, запускаем SSH-хэндшейк")
-        
-        ssh.connect(
-            hostname=ip,
-            username=username,
-            password=password,
-            port=port,
-            timeout=timeout,
-            sock=sock,
-            look_for_keys=False,
-            allow_agent=False
+        result = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, timeout=timeout
         )
-        logger.info(f"SSH подключение к {ip}:{port} успешно")
-        return ssh
-    except Exception:
-        ssh.close()
-        raise
-
-
-# ==========================================
-# РЕЖИМ 1: Прямое SSH-подключение (если порт доступен)
-# ==========================================
-
-@app.post("/api/verify_ssh")
-def verify_ssh(
-    ip: str = Form(...),
-    port: int = Form(22),
-    username: str = Form(...),
-    password: str = Form(...)
-):
-    try:
-        ssh = ssh_connect(ip, username, password, port=port)
-        ssh.close()
-        return {"success": True, "mode": "direct"}
-    except paramiko.AuthenticationException:
-        return {"success": False, "error": "Неверный логин или пароль."}
-    except socket.timeout:
-        # Порт недоступен из облака → предлагаем ручной режим
-        return {
-            "success": True, 
-            "mode": "manual",
-            "warning": f"Порт {port} сервера {ip} недоступен из облака (фаервол). Будет использован ручной режим установки."
-        }
-    except ConnectionRefusedError:
-        return {"success": False, "error": f"Соединение отклонено {ip}:{port}. SSH-сервер не запущен или порт закрыт."}
-    except OSError as e:
-        # Сетевая ошибка → тоже предлагаем ручной режим
-        return {
-            "success": True,
-            "mode": "manual", 
-            "warning": f"Не удалось подключиться к {ip}:{port} из облака ({str(e)}). Будет использован ручной режим."
-        }
+        return result.returncode == 0, result.stdout, result.stderr
+    except subprocess.TimeoutExpired:
+        return False, "", "Команда превысила таймаут"
     except Exception as e:
-        logger.error(f"SSH ошибка для {ip}:{port}: {type(e).__name__}: {e}")
-        return {
-            "success": True,
-            "mode": "manual",
-            "warning": f"SSH-подключение из облака невозможно ({type(e).__name__}). Будет использован ручной режим."
-        }
+        return False, "", str(e)
 
 
-# ==========================================
-# РЕЖИМ 2: Генерация команды для ручной установки
-# ==========================================
+def get_status():
+    """Получает текущий статус OlcRTC."""
+    info = {
+        "installed": os.path.exists(BINARY_PATH),
+        "service_exists": os.path.exists(SERVICE_FILE),
+        "running": False,
+        "config": None,
+    }
 
-@app.post("/api/generate_command")
-def generate_command(
-    provider: str = Form(...),
-    transport: str = Form(...),
-    room: str = Form(...),
-    bot_name: str = Form(...)
-):
-    """Генерирует однострочную команду для ручной установки на сервере."""
-    command = (
-        f'wget -qO install.sh "https://raw.githubusercontent.com/Andreyleluk-GAS/LE-Olcrtc/main/install-olcrtc.sh" '
-        f'&& chmod +x install.sh '
-        f'&& (echo "{provider}"; sleep 1; echo "{transport}"; sleep 1; echo "{room}"; sleep 1; echo "{bot_name}") | ./install.sh '
-        f'&& rm -f install.sh'
-    )
-    return {"success": True, "command": command}
+    if info["service_exists"]:
+        ok, stdout, _ = run_cmd("systemctl is-active olcrtc")
+        info["running"] = stdout.strip() == "active"
 
-
-# ==========================================
-# Прямая SSH-установка (когда порт доступен)
-# ==========================================
-
-def run_ssh_install(ip, username, password, port, provider, transport, room, bot_name):
-    try:
-        ssh = ssh_connect(ip, username, password, port=port)
-        
-        ssh.exec_command("wget -qO install.sh 'https://raw.githubusercontent.com/Andreyleluk-GAS/LE-Olcrtc/main/install-olcrtc.sh' && chmod +x install.sh")
-        time.sleep(2)
-        
-        install_cmd = f'(echo "{provider}"; sleep 1; echo "{transport}"; sleep 1; echo "{room}"; sleep 1; echo "{bot_name}") | ./install.sh'
-        
-        stdin, stdout, stderr = ssh.exec_command(install_cmd)
-        
-        exit_status = stdout.channel.recv_exit_status()
-        ssh.exec_command("rm -f install.sh")
-        ssh.close()
-        
-        if exit_status == 0:
-            return True, None
-        else:
-            return False, stderr.read().decode("utf-8")
-
-    except Exception as e:
-        logger.error(f"Ошибка установки на {ip}: {type(e).__name__}: {e}")
-        return False, f"{type(e).__name__}: {str(e)}"
-
-@app.post("/api/install")
-def install_bot(
-    ip: str = Form(...),
-    port: int = Form(22),
-    username: str = Form(...),
-    password: str = Form(...),
-    provider: str = Form(...),
-    transport: str = Form(...),
-    room: str = Form(...),
-    bot_name: str = Form(...)
-):
-    success, error = run_ssh_install(ip, username, password, port, provider, transport, room, bot_name)
-    
-    if success:
-        return {"success": True, "link": room}
-    else:
-        return {"success": False, "error": error}
-
-
-# ==========================================
-# Диагностика подключения
-# ==========================================
-
-@app.get("/api/diagnose/{ip}")
-def diagnose_connectivity(ip: str):
-    """Диагностический эндпоинт — проверяет сетевое подключение к серверу."""
-    results = {}
-    
-    # 1. DNS-резолвинг
-    try:
-        resolved = socket.getaddrinfo(ip, 22, socket.AF_INET, socket.SOCK_STREAM)
-        results["dns_resolve"] = {"ok": True, "addresses": [r[4][0] for r in resolved]}
-    except Exception as e:
-        results["dns_resolve"] = {"ok": False, "error": str(e)}
-    
-    # 2. TCP подключение к порту 22
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(10)
-        start = time.time()
-        sock.connect((ip, 22))
-        elapsed = round(time.time() - start, 2)
-        
-        # Попробуем прочитать SSH-баннер
-        banner = ""
+    if os.path.exists(ENV_FILE):
+        config = {}
         try:
-            banner = sock.recv(256).decode("utf-8", errors="replace").strip()
+            with open(ENV_FILE, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if "=" in line and not line.startswith("#"):
+                        key, val = line.split("=", 1)
+                        config[key] = val.strip('"').strip("'")
+            info["config"] = config
         except Exception:
             pass
-        sock.close()
-        results["tcp_port_22"] = {"ok": True, "latency_sec": elapsed, "ssh_banner": banner}
-    except socket.timeout:
-        results["tcp_port_22"] = {"ok": False, "error": "Таймаут — порт 22 недоступен (фаервол или сервер не отвечает)"}
-    except ConnectionRefusedError:
-        results["tcp_port_22"] = {"ok": False, "error": "Порт 22 закрыт (Connection Refused)"}
-    except Exception as e:
-        results["tcp_port_22"] = {"ok": False, "error": str(e)}
-    
-    # 3. Собственный IP Railway-контейнера
+
+    return info
+
+
+# ==========================================
+# API Эндпоинты
+# ==========================================
+
+@app.get("/api/status")
+def api_status():
+    """Возвращает статус установки OlcRTC."""
+    status = get_status()
+
+    # Добавляем системную информацию
+    ok, stdout, _ = run_cmd("hostname -I 2>/dev/null | awk '{print $1}'")
+    status["server_ip"] = stdout.strip() if ok else "неизвестно"
+
+    ok, stdout, _ = run_cmd("uptime -p 2>/dev/null || uptime")
+    status["uptime"] = stdout.strip() if ok else "неизвестно"
+
+    # Лог последних строк
+    if status["service_exists"]:
+        ok, stdout, _ = run_cmd("journalctl -u olcrtc -n 10 --no-pager 2>/dev/null")
+        status["recent_logs"] = stdout.strip() if ok else ""
+
+    return status
+
+
+@app.get("/api/logs")
+def api_logs(lines: int = 50):
+    """Возвращает логи OlcRTC."""
+    ok, stdout, stderr = run_cmd(f"journalctl -u olcrtc -n {lines} --no-pager 2>/dev/null")
+    if ok:
+        return {"success": True, "logs": stdout}
+    return {"success": False, "error": stderr or "Не удалось получить логи"}
+
+
+@app.post("/api/install")
+def api_install(
+    provider: str = Form(...),
+    transport: str = Form(...),
+    room: str = Form(...),
+    bot_name: str = Form(""),
+    enc_key: str = Form(""),
+    client_id: str = Form(""),
+):
+    """Запускает установку OlcRTC на этом сервере."""
+    logger.info(f"Начинаем установку: provider={provider}, transport={transport}")
+
+    # Маппинг провайдеров
+    provider_map = {"1": "telemost", "2": "wbstream", "3": "jazz"}
+    provider_name = provider_map.get(provider, provider)
+
+    # Маппинг транспорта
+    transport_map = {
+        "1": "vp8channel", "2": "videochannel",
+        "3": "seichannel", "4": "datachannel"
+    }
+    transport_name = transport_map.get(transport, transport)
+
+    # Парсинг Room ID из ссылки
+    room_id = room
+    full_invite_link = room
+    s_room_psw_hash = ""
+    s_room_password = ""
+
+    if "http" in room:
+        # Извлекаем ID из ссылки
+        parts = room.split("?")[0].rstrip("/").split("/")
+        room_id = parts[-1] if parts else room
+
+        # Для Jazz — извлекаем psw hash
+        if provider_name == "jazz" and "?psw=" in room:
+            s_room_psw_hash = room.split("?psw=")[1].split("&")[0]
+    else:
+        # Формируем ссылку из ID
+        if provider_name == "telemost":
+            full_invite_link = f"https://telemost.yandex.ru/j/{room_id}"
+        elif provider_name == "wbstream":
+            full_invite_link = f"https://stream.wb.ru/room/{room_id}"
+        elif provider_name == "jazz":
+            full_invite_link = f"https://salutejazz.ru/calls/{room_id}"
+
+    # Генерация ключа и client_id если не заданы
+    if not enc_key:
+        ok, stdout, _ = run_cmd("openssl rand -hex 32")
+        enc_key = stdout.strip() if ok else "0" * 64
+    if not client_id:
+        ok, stdout, _ = run_cmd("openssl rand -hex 4")
+        client_id = stdout.strip() if ok else "abcd1234"
+
+    # Генерация имени бота для Jazz
+    if provider_name == "jazz" and not bot_name:
+        import random
+        names = ["Александр", "Мария", "Иван", "Елена", "Дмитрий", "Анна", "Сергей", "Ольга"]
+        bot_name = random.choice(names)
+
+    # --- Шаг 1: Проверяем, установлен ли бинарник ---
+    need_build = not os.path.exists(BINARY_PATH)
+
+    if need_build:
+        logger.info("Бинарник не найден, запускаем полную установку...")
+
+        # Загрузка и запуск install-olcrtc.sh в неинтерактивном режиме
+        # Для этого используем переменные окружения вместо интерактивного ввода
+        install_env = os.environ.copy()
+        install_env["DEBIAN_FRONTEND"] = "noninteractive"
+        install_env["NEEDRESTART_MODE"] = "a"
+
+        # Сначала ставим зависимости
+        logger.info("Установка зависимостей...")
+        run_cmd("apt-get update -q && apt-get install -yq git build-essential ffmpeg", timeout=300)
+
+        # Проверяем Go
+        ok, _, _ = run_cmd("go version")
+        if not ok:
+            logger.info("Установка Go...")
+            go_cmds = """
+            GO_VERSION=$(curl -sL https://go.dev/VERSION?m=text | head -n 1 | tr -d '[:space:]')
+            rm -rf /usr/local/go
+            wget -q -O /tmp/go.tar.gz "https://go.dev/dl/${GO_VERSION}.linux-amd64.tar.gz"
+            tar -C /usr/local -xzf /tmp/go.tar.gz
+            rm -f /tmp/go.tar.gz
+            ln -sf /usr/local/go/bin/go /usr/bin/go
+            ln -sf /usr/local/go/bin/gofmt /usr/bin/gofmt
+            """
+            ok, _, err = run_cmd(go_cmds, timeout=300)
+            if not ok:
+                return {"success": False, "error": f"Ошибка установки Go: {err}", "step": "go"}
+
+        # Устанавливаем Mage
+        logger.info("Установка Mage...")
+        mage_cmds = """
+        export PATH="/usr/local/go/bin:$PATH"
+        export GOPATH=~/go
+        mkdir -p ~/go/bin ~/go/tmp ~/go/cache
+        cd ~ && rm -rf mage && git clone -q https://github.com/magefile/mage && cd mage && /usr/local/go/bin/go run bootstrap.go
+        """
+        ok, _, err = run_cmd(mage_cmds, timeout=300)
+        if not ok:
+            return {"success": False, "error": f"Ошибка установки Mage: {err}", "step": "mage"}
+
+        # Клонируем и собираем OlcRTC
+        logger.info("Сборка OlcRTC...")
+
+        # Jazz-патч если нужно
+        jazz_patch = ""
+        if provider_name == "jazz":
+            jazz_patch = f"""
+            if wget -qO jazz_patcher.sh "https://raw.githubusercontent.com/Andreyleluk-GAS/LE-Olcrtc/main/jazz_patcher.sh" 2>/dev/null; then
+                chmod +x jazz_patcher.sh
+                ./jazz_patcher.sh "{bot_name}" "{s_room_psw_hash}" "{s_room_password}"
+                rm -f jazz_patcher.sh
+            fi
+            """
+
+        build_cmds = f"""
+        export PATH="/usr/local/go/bin:$HOME/go/bin:$PATH"
+        export GOPATH=~/go
+        export GOTMPDIR=~/go/tmp
+        export GOCACHE=~/go/cache
+        export GOMAXPROCS=1
+        export GOFLAGS="-p=1"
+        mkdir -p ~/go/tmp ~/go/cache
+        cd ~ && rm -rf olcrtc
+        git clone -q https://github.com/openlibrecommunity/olcrtc.git --recurse-submodules
+        cd ~/olcrtc
+        {jazz_patch}
+        ~/go/bin/mage build
+        mkdir -p /opt/olcrtc/data
+        cp build/olcrtc-linux-amd64 /opt/olcrtc/olcrtc
+        cd ~/olcrtc && git rev-parse HEAD > /opt/olcrtc/.local_version
+        cd ~ && rm -rf olcrtc mage ~/go/tmp ~/go/cache
+        """
+        ok, stdout, err = run_cmd(build_cmds, timeout=1800)  # до 30 минут на сборку
+        if not ok:
+            return {"success": False, "error": f"Ошибка сборки OlcRTC: {err[-500:]}", "step": "build"}
+
+    # --- Шаг 2: Применяем конфигурацию ---
+    logger.info("Применяем конфигурацию...")
+
+    # Формирование флагов транспорта
+    transport_flags = {
+        "vp8channel": "-vp8-fps 60 -vp8-batch 64",
+        "seichannel": "-fps 60 -batch 64 -frag 900 -ack-ms 2000",
+        "videochannel": "-video-codec qrcode -video-w 1080 -video-h 1080 -video-fps 60 -video-bitrate 5000k -video-hw none",
+        "datachannel": "",
+    }.get(transport_name, "")
+
+    # Создаём systemd сервис
+    service_content = f"""[Unit]
+Description=OlcRTC Proxy Server
+After=network.target
+
+# FullLink={full_invite_link}
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/olcrtc
+ExecStart=/opt/olcrtc/olcrtc -mode srv -carrier {provider_name} -transport {transport_name} -link direct -dns 1.1.1.1:53 -data data -id "{room_id}" -key "{enc_key}" -client-id "{client_id}" {transport_flags}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+"""
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        results["container_ip"] = s.getsockname()[0]
-        s.close()
-    except Exception:
-        results["container_ip"] = "не определён"
-    
-    return results
+        with open(SERVICE_FILE, "w") as f:
+            f.write(service_content)
+    except Exception as e:
+        return {"success": False, "error": f"Не удалось создать сервис: {e}", "step": "service"}
+
+    # Сохраняем конфигурацию
+    env_content = f"""S_PROVIDER="{provider_name}"
+S_TRANSPORT="{transport_name}"
+S_ROOM_ID="{room_id}"
+S_ENC_KEY="{enc_key}"
+S_CLIENT_ID="{client_id}"
+S_ROOM_PASSWORD="{s_room_password}"
+S_ROOM_PSW_HASH="{s_room_psw_hash}"
+S_BOT_NAME="{bot_name}"
+"""
+    os.makedirs("/opt/olcrtc", exist_ok=True)
+    with open(ENV_FILE, "w") as f:
+        f.write(env_content)
+    os.chmod(ENV_FILE, 0o600)
+
+    # Перезапускаем сервис
+    run_cmd("systemctl daemon-reload")
+    run_cmd("systemctl enable olcrtc")
+    run_cmd("systemctl restart olcrtc")
+    time.sleep(2)
+
+    # Проверяем статус
+    ok, stdout, _ = run_cmd("systemctl is-active olcrtc")
+    is_running = stdout.strip() == "active"
+
+    # Формируем URI для Olcbox
+    olcrtc_uri = f"olcrtc://{provider_name}?{transport_name}@{room_id}#{enc_key}%{client_id}$OlcRTC_Server"
+
+    return {
+        "success": True,
+        "running": is_running,
+        "config": {
+            "provider": provider_name,
+            "transport": transport_name,
+            "room_id": room_id,
+            "enc_key": enc_key,
+            "client_id": client_id,
+            "bot_name": bot_name,
+            "invite_link": full_invite_link,
+            "olcrtc_uri": olcrtc_uri,
+        }
+    }
+
+
+@app.post("/api/stop")
+def api_stop():
+    """Останавливает OlcRTC."""
+    run_cmd("systemctl stop olcrtc")
+    return {"success": True}
+
+
+@app.post("/api/start")
+def api_start():
+    """Запускает OlcRTC."""
+    run_cmd("systemctl start olcrtc")
+    time.sleep(1)
+    ok, stdout, _ = run_cmd("systemctl is-active olcrtc")
+    return {"success": True, "running": stdout.strip() == "active"}
+
+
+@app.post("/api/restart")
+def api_restart():
+    """Перезапускает OlcRTC."""
+    run_cmd("systemctl restart olcrtc")
+    time.sleep(2)
+    ok, stdout, _ = run_cmd("systemctl is-active olcrtc")
+    return {"success": True, "running": stdout.strip() == "active"}
+
+
+@app.post("/api/uninstall")
+def api_uninstall():
+    """Полностью удаляет OlcRTC."""
+    run_cmd("systemctl stop olcrtc")
+    run_cmd("systemctl disable olcrtc")
+    run_cmd(f"rm -f {SERVICE_FILE}")
+    run_cmd("systemctl daemon-reload")
+    run_cmd("rm -rf /opt/olcrtc")
+    return {"success": True}
 
 
 # --- РАЗДАЧА ФРОНТЕНДА (REACT) ---
