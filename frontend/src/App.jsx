@@ -24,28 +24,14 @@ export default function App() {
   const [cmdInput, setCmdInput] = useState('');
   const [cmdOutput, setCmdOutput] = useState('');
   const [cmdRunning, setCmdRunning] = useState(false);
-  const [modal, setModal] = useState(null);
   const logsRef = useRef(null);
   const cmdRef = useRef(null);
-  const pageRef = useRef('loading');
 
-  const nav = (p) => { pageRef.current = p; setPage(p); window.history.pushState({page:p},'')};
-
-  useEffect(() => {
-    load(); fetch('/api/provider_transports').then(r=>r.json()).then(setPt).catch(()=>{});
-    const onPop = (e) => {
-      const prev = pageRef.current;
-      if(prev==='menu') { setModal({type:'exit'}); window.history.pushState({page:'menu'},''); return; }
-      nav('menu'); setError(null); setSuccess(null);
-    };
-    window.addEventListener('popstate', onPop);
-    window.history.replaceState({page:'loading'},'');
-    return () => window.removeEventListener('popstate', onPop);
-  }, []);
+  useEffect(() => { load(); fetch('/api/provider_transports').then(r=>r.json()).then(setPt).catch(()=>{}); }, []);
 
   const load = async () => {
-    try { const r = await fetch('/api/status'); const d = await r.json(); setStatus(d); pageRef.current='menu'; setPage('menu'); window.history.replaceState({page:'menu'},''); }
-    catch { pageRef.current='menu'; setPage('menu'); }
+    try { const r = await fetch('/api/status'); const d = await r.json(); setStatus(d); setPage('menu'); }
+    catch { setPage('menu'); }
   };
 
   const getLogs = async () => {
@@ -173,18 +159,6 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .brow{display:flex;gap:7px;flex-wrap:wrap}
 .bghost{background:transparent;border:1px solid var(--ib);color:var(--muted)}
 .bghost:hover{background:var(--ibg)}
-.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.45);z-index:100;display:flex;align-items:center;justify-content:center;animation:mfade .2s}
-.modal-box{background:#fff;border-radius:16px;padding:28px 24px;max-width:340px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.2);text-align:center;animation:mslide .25s}
-.modal-box h3{font-size:18px;font-weight:600;margin-bottom:8px}
-.modal-box p{font-size:14px;color:var(--muted);margin-bottom:20px;line-height:1.5}
-.modal-btns{display:flex;gap:8px}
-.modal-btns button{flex:1;padding:12px;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;transition:.15s}
-.mbtn-danger{background:#ef4444;color:#fff}
-.mbtn-danger:hover{background:#dc2626}
-.mbtn-cancel{background:var(--ibg);color:var(--text);border:1px solid var(--border)!important}
-.mbtn-cancel:hover{background:#e5e7eb}
-@keyframes mfade{from{opacity:0}to{opacity:1}}
-@keyframes mslide{from{opacity:0;transform:scale(.9) translateY(10px)}to{opacity:1;transform:scale(1) translateY(0)}}
 .alert{padding:12px 14px;border-radius:10px;font-size:13px;margin-bottom:14px;animation:si .3s;display:flex;align-items:flex-start;gap:8px}
 .ae{background:#fee2e2;border:1px solid #fecaca;color:#b91c1c}
 .as{background:#dcfce7;border:1px solid #bbf7d0;color:#15803d}
@@ -227,25 +201,25 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
       {/* ══ MENU ══ */}
       {page==='menu' && <div className="card">
         <div className="ct">📋 Главное меню</div>
-        <div className="mi" onClick={()=>{setMode(status?.installed?'reconfig':'full');nav('install');setError(null);setSuccess(null);clearFields();}}>
+        <div className="mi" onClick={()=>{setMode(status?.installed?'reconfig':'full');setPage('install');setError(null);setSuccess(null);clearFields();}}>
           <span className="ic">🚀</span>
           <div className="mt"><div>{status?.installed?'Настроить OlcRTC':'Установить OlcRTC'}</div><div className="ds">{status?.installed?'Изменить конфигурацию или переустановить':'Полная установка и настройка'}</div></div>
         </div>
         {status?.installed && <>
-          <div className="mi" onClick={()=>{nav('dashboard');setError(null);setSuccess(null);}}>
+          <div className="mi" onClick={()=>{setPage('dashboard');setError(null);setSuccess(null);}}>
             <span className="ic">📊</span><div className="mt"><div>Статус и реквизиты</div><div className="ds">Конфигурация, URI, ключи</div></div>
           </div>
-          <div className="mi" onClick={()=>{getLogs();nav('logs');setError(null);}}>
+          <div className="mi" onClick={()=>{getLogs();setPage('logs');setError(null);}}>
             <span className="ic">📋</span><div className="mt"><div>Логи сервера</div><div className="ds">Журнал работы OlcRTC</div></div>
           </div>
           <div className="mi" onClick={checkUpdate} style={{opacity:checkingUpdate?.5:1}}>
             <span className="ic">🔄</span><div className="mt"><div>Проверить обновления</div><div className="ds">{checkingUpdate?'Проверяем...':'Обновить ядро OlcRTC без удаления настроек'}</div></div>
           </div>
-          <div className="mi" onClick={()=>{setCmdOutput('');nav('console');setError(null);}}>
+          <div className="mi" onClick={()=>{setCmdOutput('');setPage('console');setError(null);}}>
             <span className="ic">🖥️</span><div className="mt"><div>Консоль</div><div className="ds">Выполнить команду на сервере</div></div>
           </div>
           <hr className="sep"/>
-          <div className="mi" onClick={()=>setModal({type:'delete'})}>
+          <div className="mi" onClick={()=>{if(window.confirm('Полностью удалить OlcRTC?'))act('uninstall');}}>
             <span className="ic">🗑</span><div className="mt"><div style={{color:'var(--red)'}}>Удалить OlcRTC</div><div className="ds">Остановить и удалить все файлы</div></div>
           </div>
         </>}
@@ -331,7 +305,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
             <input name="client_id" className="fi" value={clientId} onChange={e=>setClientId(e.target.value)} placeholder="Авто-генерация"/>
           </div>
           <button type="submit" className="btn bp">{mode==='reconfig'?'⚙️ Применить конфигурацию':'🚀 Установить и запустить'}</button>
-          <button type="button" className="btn bp bghost" style={{marginTop:8}} onClick={()=>{nav('menu');setError(null);setSuccess(null);}}>← Назад в меню</button>
+          <button type="button" className="btn bp bghost" style={{marginTop:8}} onClick={()=>{setPage('menu');setError(null);setSuccess(null);}}>← Назад в меню</button>
         </form>
       </div>}
 
@@ -387,32 +361,12 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
         <div className="card">
           <div className="ct">🛠 Управление</div>
           <div className="brow">
-            <button className="btn bs bb" onClick={()=>{setMode('reconfig');nav('install');setError(null);setSuccess(null);clearFields();}}>⚙️ Настройки</button>
-            <button className="btn bs bghost" onClick={()=>nav('menu')}>← Меню</button>
+            <button className="btn bs bb" onClick={()=>{setMode('reconfig');setPage('install');setError(null);setSuccess(null);clearFields();}}>⚙️ Настройки</button>
+            <button className="btn bs br" disabled={loading} onClick={()=>{if(window.confirm('Удалить OlcRTC?'))act('uninstall')}}>🗑 Удалить</button>
+            <button className="btn bs bghost" onClick={()=>setPage('menu')}>← Меню</button>
           </div>
         </div>
       </>}
-      {/* ══ MODAL ══ */}
-      {modal && <div className="modal-overlay" onClick={()=>setModal(null)}>
-        <div className="modal-box" onClick={e=>e.stopPropagation()}>
-          {modal.type==='delete' && <>
-            <h3>🗑 Удалить OlcRTC?</h3>
-            <p>Будут удалены все файлы и настройки OlcRTC.Отменить это действие невозможно.</p>
-            <div className="modal-btns">
-              <button className="mbtn-cancel" onClick={()=>setModal(null)}>Отменить</button>
-              <button className="mbtn-danger" onClick={()=>{setModal(null);act('uninstall');}}>Удалить</button>
-            </div>
-          </>}
-          {modal.type==='exit' && <>
-            <h3>🚪 Выйти из панели?</h3>
-            <p>Вы уверены, что хотите закрыть панель управления OlcRTC?</p>
-            <div className="modal-btns">
-              <button className="mbtn-cancel" onClick={()=>setModal(null)}>Остаться</button>
-              <button className="mbtn-danger" onClick={()=>{setModal(null);window.close();window.history.back();}}>Выйти</button>
-            </div>
-          </>}
-        </div>
-      </div>}
     </div>
   );
 }
