@@ -63,6 +63,10 @@ def ssh_connect(ip, username, password, port=22, timeout=SSH_TIMEOUT):
         raise
 
 
+# ==========================================
+# РЕЖИМ 1: Прямое SSH-подключение (если порт доступен)
+# ==========================================
+
 @app.post("/api/verify_ssh")
 def verify_ssh(
     ip: str = Form(...),
@@ -73,19 +77,105 @@ def verify_ssh(
     try:
         ssh = ssh_connect(ip, username, password, port=port)
         ssh.close()
-        return {"success": True}
+        return {"success": True, "mode": "direct"}
     except paramiko.AuthenticationException:
         return {"success": False, "error": "Неверный логин или пароль."}
     except socket.timeout:
-        return {"success": False, "error": f"Таймаут при подключении к {ip}:{port}. Сервер не отвечает (порт недоступен из облака)."}
+        # Порт недоступен из облака → предлагаем ручной режим
+        return {
+            "success": True, 
+            "mode": "manual",
+            "warning": f"Порт {port} сервера {ip} недоступен из облака (фаервол). Будет использован ручной режим установки."
+        }
     except ConnectionRefusedError:
         return {"success": False, "error": f"Соединение отклонено {ip}:{port}. SSH-сервер не запущен или порт закрыт."}
     except OSError as e:
-        return {"success": False, "error": f"Сетевая ошибка при подключении к {ip}:{port}: {str(e)}"}
+        # Сетевая ошибка → тоже предлагаем ручной режим
+        return {
+            "success": True,
+            "mode": "manual", 
+            "warning": f"Не удалось подключиться к {ip}:{port} из облака ({str(e)}). Будет использован ручной режим."
+        }
     except Exception as e:
         logger.error(f"SSH ошибка для {ip}:{port}: {type(e).__name__}: {e}")
-        return {"success": False, "error": f"Не удалось подключиться: {type(e).__name__}: {str(e)}"}
+        return {
+            "success": True,
+            "mode": "manual",
+            "warning": f"SSH-подключение из облака невозможно ({type(e).__name__}). Будет использован ручной режим."
+        }
 
+
+# ==========================================
+# РЕЖИМ 2: Генерация команды для ручной установки
+# ==========================================
+
+@app.post("/api/generate_command")
+def generate_command(
+    provider: str = Form(...),
+    transport: str = Form(...),
+    room: str = Form(...),
+    bot_name: str = Form(...)
+):
+    """Генерирует однострочную команду для ручной установки на сервере."""
+    command = (
+        f'wget -qO install.sh "https://raw.githubusercontent.com/Andreyleluk-GAS/LE-Olcrtc/main/install-olcrtc.sh" '
+        f'&& chmod +x install.sh '
+        f'&& (echo "{provider}"; sleep 1; echo "{transport}"; sleep 1; echo "{room}"; sleep 1; echo "{bot_name}") | ./install.sh '
+        f'&& rm -f install.sh'
+    )
+    return {"success": True, "command": command}
+
+
+# ==========================================
+# Прямая SSH-установка (когда порт доступен)
+# ==========================================
+
+def run_ssh_install(ip, username, password, port, provider, transport, room, bot_name):
+    try:
+        ssh = ssh_connect(ip, username, password, port=port)
+        
+        ssh.exec_command("wget -qO install.sh 'https://raw.githubusercontent.com/Andreyleluk-GAS/LE-Olcrtc/main/install-olcrtc.sh' && chmod +x install.sh")
+        time.sleep(2)
+        
+        install_cmd = f'(echo "{provider}"; sleep 1; echo "{transport}"; sleep 1; echo "{room}"; sleep 1; echo "{bot_name}") | ./install.sh'
+        
+        stdin, stdout, stderr = ssh.exec_command(install_cmd)
+        
+        exit_status = stdout.channel.recv_exit_status()
+        ssh.exec_command("rm -f install.sh")
+        ssh.close()
+        
+        if exit_status == 0:
+            return True, None
+        else:
+            return False, stderr.read().decode("utf-8")
+
+    except Exception as e:
+        logger.error(f"Ошибка установки на {ip}: {type(e).__name__}: {e}")
+        return False, f"{type(e).__name__}: {str(e)}"
+
+@app.post("/api/install")
+def install_bot(
+    ip: str = Form(...),
+    port: int = Form(22),
+    username: str = Form(...),
+    password: str = Form(...),
+    provider: str = Form(...),
+    transport: str = Form(...),
+    room: str = Form(...),
+    bot_name: str = Form(...)
+):
+    success, error = run_ssh_install(ip, username, password, port, provider, transport, room, bot_name)
+    
+    if success:
+        return {"success": True, "link": room}
+    else:
+        return {"success": False, "error": error}
+
+
+# ==========================================
+# Диагностика подключения
+# ==========================================
 
 @app.get("/api/diagnose/{ip}")
 def diagnose_connectivity(ip: str):
@@ -132,49 +222,6 @@ def diagnose_connectivity(ip: str):
         results["container_ip"] = "не определён"
     
     return results
-
-
-def run_ssh_install(ip, username, password, port, provider, transport, room, bot_name):
-    try:
-        ssh = ssh_connect(ip, username, password, port=port)
-        
-        ssh.exec_command("wget -qO install.sh 'https://raw.githubusercontent.com/Andreyleluk-GAS/LE-Olcrtc/main/install-olcrtc.sh' && chmod +x install.sh")
-        time.sleep(2)
-        
-        install_cmd = f'(echo "{provider}"; sleep 1; echo "{transport}"; sleep 1; echo "{room}"; sleep 1; echo "{bot_name}") | ./install.sh'
-        
-        stdin, stdout, stderr = ssh.exec_command(install_cmd)
-        
-        exit_status = stdout.channel.recv_exit_status()
-        ssh.exec_command("rm -f install.sh")
-        ssh.close()
-        
-        if exit_status == 0:
-            return True, None
-        else:
-            return False, stderr.read().decode("utf-8")
-
-    except Exception as e:
-        logger.error(f"Ошибка установки на {ip}: {type(e).__name__}: {e}")
-        return False, f"{type(e).__name__}: {str(e)}"
-
-@app.post("/api/install")
-def install_bot(
-    ip: str = Form(...),
-    port: int = Form(22),
-    username: str = Form(...),
-    password: str = Form(...),
-    provider: str = Form(...),
-    transport: str = Form(...),
-    room: str = Form(...),
-    bot_name: str = Form(...)
-):
-    success, error = run_ssh_install(ip, username, password, port, provider, transport, room, bot_name)
-    
-    if success:
-        return {"success": True, "link": room}
-    else:
-        return {"success": False, "error": error}
 
 
 # --- РАЗДАЧА ФРОНТЕНДА (REACT) ---
