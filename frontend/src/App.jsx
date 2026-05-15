@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-const TREC = { telemost:'vp8channel', wbstream:'datachannel', jazz:'vp8channel' };
-const TINFO = { vp8channel:'Высокая скорость', datachannel:'Макс. скорость', seichannel:'Средняя скорость', videochannel:'Низкая скорость' };
-const PCOLORS = { telemost:'#ffcc00', wbstream:'#cb11ab', jazz:'#2196f3' };
-const PLABELS = { telemost:'Yandex Telemost', wbstream:'WB Stream', jazz:'Sber SaluteJazz' };
+const TREC = { telemost: 'vp8channel', wbstream: 'datachannel', jazz: 'vp8channel' };
+const TINFO = { vp8channel: 'Высокая скорость', datachannel: 'Макс. скорость', seichannel: 'Средняя скорость', videochannel: 'Низкая скорость' };
+const PCOLORS = { telemost: '#ffcc00', wbstream: '#cb11ab', jazz: '#2196f3' };
+const PLABELS = { telemost: 'Yandex Telemost', wbstream: 'WB Stream', jazz: 'Sber SaluteJazz' };
 
 export default function App() {
   const [page, setPage] = useState('loading');
@@ -27,7 +27,7 @@ export default function App() {
   const logsRef = useRef(null);
   const cmdRef = useRef(null);
 
-  useEffect(() => { load(); fetch('/api/provider_transports').then(r=>r.json()).then(setPt).catch(()=>{}); }, []);
+  useEffect(() => { load(); fetch('/api/provider_transports').then(r => r.json()).then(setPt).catch(() => { }); }, []);
 
   const load = async () => {
     try { const r = await fetch('/api/status'); const d = await r.json(); setStatus(d); setPage('menu'); }
@@ -35,48 +35,50 @@ export default function App() {
   };
 
   const getLogs = async () => {
-    try { const r = await fetch('/api/logs?lines=100'); const d = await r.json(); setLogs(d.logs||d.error||''); setTimeout(()=>{if(logsRef.current)logsRef.current.scrollTop=logsRef.current.scrollHeight;},50); } catch { setLogs('Ошибка'); }
+    try { const r = await fetch('/api/logs?lines=100'); const d = await r.json(); setLogs(d.logs || d.error || ''); setTimeout(() => { if (logsRef.current) logsRef.current.scrollTop = logsRef.current.scrollHeight; }, 50); } catch { setLogs('Ошибка'); }
   };
 
   const execCmd = async (directCmd) => {
     const cmd = directCmd || cmdInput;
-    if(!cmd.trim()||cmdRunning) return;
+    if (!cmd.trim() || cmdRunning) return;
     setCmdRunning(true);
     const host = status?.server_ip || 'server';
     setCmdOutput(o => o + `\nroot@${host}:~# ${cmd}\n`);
     setCmdInput('');
     try {
       const fd = new FormData(); fd.append('command', cmd);
-      const r = await fetch('/api/exec',{method:'POST',body:fd}); const d = await r.json();
-      setCmdOutput(o => o + (d.stdout||'') + (d.stderr ? d.stderr : '') + '\n');
+      const r = await fetch('/api/exec', { method: 'POST', body: fd }); const d = await r.json();
+      setCmdOutput(o => o + (d.stdout || '') + (d.stderr ? d.stderr : '') + '\n');
     } catch { setCmdOutput(o => o + 'Ошибка сети\n'); }
-    finally { setCmdRunning(false); setTimeout(()=>{if(cmdRef.current)cmdRef.current.scrollTop=cmdRef.current.scrollHeight;},50); }
+    finally { setCmdRunning(false); setTimeout(() => { if (cmdRef.current) cmdRef.current.scrollTop = cmdRef.current.scrollHeight; }, 50); }
   };
 
   const handleInstall = async (e) => {
     e.preventDefault(); setInstalling(true); setError(null); setSuccess(null);
     const fd = new FormData(e.target);
-    const ep = mode==='reconfig' ? '/api/reconfigure' : '/api/install';
-    try { const r = await fetch(ep,{method:'POST',body:fd}); const d = await r.json();
-      if(d.success){setSuccess(mode==='reconfig'?'Конфигурация обновлена!':'OlcRTC установлен!'); await load(); setPage('dashboard');}
-      else setError(`Ошибка (${d.step||'?'}): ${d.error}`);
+    const ep = mode === 'reconfig' ? '/api/reconfigure' : '/api/install';
+    try {
+      const r = await fetch(ep, { method: 'POST', body: fd }); const d = await r.json();
+      if (d.success) { setSuccess(mode === 'reconfig' ? 'Конфигурация обновлена!' : 'OlcRTC установлен!'); await load(); setPage('dashboard'); }
+      else setError(`Ошибка (${d.step || '?'}): ${d.error}`);
     } catch { setError('Ошибка сети'); } finally { setInstalling(false); }
   };
 
   const act = async (a) => {
     setLoading(true); setError(null); setSuccess(null);
-    try { const r = await fetch(`/api/${a}`,{method:'POST'}); const d = await r.json();
-      if(d.success){setSuccess({stop:'Остановлен',start:'Запущен',restart:'Перезапущен',uninstall:'Удалён',update_binary:'Обновлён'}[a]||'OK');if(a==='uninstall')setPage('menu'); await load();}
-      else setError(d.error||'Ошибка');
+    try {
+      const r = await fetch(`/api/${a}`, { method: 'POST' }); const d = await r.json();
+      if (d.success) { setSuccess({ stop: 'Остановлен', start: 'Запущен', restart: 'Перезапущен', uninstall: 'Удалён', update_binary: 'Обновлён' }[a] || 'OK'); if (a === 'uninstall') setPage('menu'); await load(); }
+      else setError(d.error || 'Ошибка');
     } catch { setError('Ошибка сети'); } finally { setLoading(false); }
   };
 
-  const copy = (t,l) => { navigator.clipboard.writeText(t); setCopied(l); setTimeout(()=>setCopied(''),2000); };
+  const copy = (t, l) => { navigator.clipboard.writeText(t); setCopied(l); setTimeout(() => setCopied(''), 2000); };
 
   // Ссылка на конференцию из сохранённого конфига
   const getInviteLink = () => {
     if (!cfg.S_PROVIDER || !cfg.S_ROOM_ID) return '';
-    const links = { telemost:`https://telemost.yandex.ru/j/${cfg.S_ROOM_ID}`, wbstream:`https://stream.wb.ru/room/${cfg.S_ROOM_ID}`, jazz:`https://salutejazz.ru/calls/${cfg.S_ROOM_ID}` };
+    const links = { telemost: `https://telemost.yandex.ru/j/${cfg.S_ROOM_ID}`, wbstream: `https://stream.wb.ru/room/${cfg.S_ROOM_ID}`, jazz: `https://salutejazz.ru/calls/${cfg.S_ROOM_ID}` };
     return links[cfg.S_PROVIDER] || '';
   };
   const clearFields = () => { setRoom(''); setEncKey(''); setClientId(''); setBotName(''); };
@@ -84,15 +86,16 @@ export default function App() {
 
   const checkUpdate = async () => {
     setCheckingUpdate(true); setError(null); setSuccess(null);
-    try { const r = await fetch('/api/status'); const d = await r.json(); setStatus(d);
-      if(d.has_update) { if(window.confirm('Доступно обновление OlcRTC!\nОбновить сейчас? Настройки сохранятся.\nЭто может занять 5-30 минут.')) { await act('update_binary'); } else { setSuccess('Обновление отложено'); } }
+    try {
+      const r = await fetch('/api/status'); const d = await r.json(); setStatus(d);
+      if (d.has_update) { if (window.confirm('Доступно обновление OlcRTC!\nОбновить сейчас? Настройки сохранятся.\nЭто может занять 5-30 минут.')) { await act('update_binary'); } else { setSuccess('Обновление отложено'); } }
       else setSuccess('У вас актуальная версия OlcRTC');
     } catch { setError('Не удалось проверить обновления'); } finally { setCheckingUpdate(false); }
   };
 
   const cfg = status?.config || {};
   const uri = cfg.S_PROVIDER ? `olcrtc://${cfg.S_PROVIDER}?${cfg.S_TRANSPORT}@${cfg.S_ROOM_ID}#${cfg.S_ENC_KEY}%${cfg.S_CLIENT_ID}$OlcRTC_Server` : '';
-  const avail = pt[prov] || ['vp8channel','videochannel'];
+  const avail = pt[prov] || ['vp8channel', 'videochannel'];
 
   return (
     <div className="root">
@@ -181,6 +184,8 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .con-input input:focus{border-color:var(--accent)}
 .con-input button{padding:8px 16px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
 @media(max-width:480px){.root{padding:10px 8px}.card{padding:16px 12px}.brow{flex-direction:column}.brow .btn{width:100%}.cv{max-width:140px}.ct{font-size:16px;flex-wrap:wrap}.join-btn{width:100%;justify-content:center;margin-left:0;margin-top:4px}.sr{flex-direction:column;gap:6px;align-items:flex-start}.prov-badge{margin-left:0}}
+.create-room-btn{background:linear-gradient(135deg,rgba(14,165,233,.08),rgba(139,92,246,.08));border:1px solid rgba(14,165,233,.25)!important}
+.create-room-btn:hover{background:linear-gradient(135deg,rgba(14,165,233,.18),rgba(139,92,246,.15));border-color:rgba(14,165,233,.45)!important;box-shadow:0 2px 10px rgba(14,165,233,.12)}
       `}</style>
 
       <div className="hdr">
@@ -196,80 +201,83 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
       {error && <div className="alert ae"><span>⚠️</span><span>{error}</span></div>}
       {success && <div className="alert as"><span>✅</span><span>{success}</span></div>}
 
-      {page==='loading' && <div className="ip"><div className="spinner"/><div style={{color:'var(--accent)',fontWeight:500}}>Загрузка...</div></div>}
+      {page === 'loading' && <div className="ip"><div className="spinner" /><div style={{ color: 'var(--accent)', fontWeight: 500 }}>Загрузка...</div></div>}
 
       {/* ══ MENU ══ */}
-      {page==='menu' && <div className="card">
+      {page === 'menu' && <div className="card">
         <div className="ct">📋 Главное меню</div>
-        <div className="mi" onClick={()=>{setMode(status?.installed?'reconfig':'full');setPage('install');setError(null);setSuccess(null);clearFields();}}>
+        <div className="mi" onClick={() => { setMode(status?.installed ? 'reconfig' : 'full'); setPage('install'); setError(null); setSuccess(null); clearFields(); }}>
           <span className="ic">🚀</span>
-          <div className="mt"><div>{status?.installed?'Настроить OlcRTC':'Установить OlcRTC'}</div><div className="ds">{status?.installed?'Изменить конфигурацию или переустановить':'Полная установка и настройка'}</div></div>
+          <div className="mt"><div>{status?.installed ? 'Настроить OlcRTC' : 'Установить OlcRTC'}</div><div className="ds">{status?.installed ? 'Изменить конфигурацию или переустановить' : 'Полная установка и настройка'}</div></div>
         </div>
         {status?.installed && <>
-          <div className="mi" onClick={()=>{setPage('dashboard');setError(null);setSuccess(null);}}>
+          <div className="mi" onClick={() => { setPage('dashboard'); setError(null); setSuccess(null); }}>
             <span className="ic">📊</span><div className="mt"><div>Статус и реквизиты</div><div className="ds">Конфигурация, URI, ключи</div></div>
           </div>
-          <div className="mi" onClick={()=>{getLogs();setPage('logs');setError(null);}}>
+          <div className="mi" onClick={() => { getLogs(); setPage('logs'); setError(null); }}>
             <span className="ic">📋</span><div className="mt"><div>Логи сервера</div><div className="ds">Журнал работы OlcRTC</div></div>
           </div>
-          <div className="mi" onClick={checkUpdate} style={{opacity:checkingUpdate?.5:1}}>
-            <span className="ic">🔄</span><div className="mt"><div>Проверить обновления</div><div className="ds">{checkingUpdate?'Проверяем...':'Обновить ядро OlcRTC без удаления настроек'}</div></div>
+          <div className="mi" onClick={checkUpdate} style={{ opacity: checkingUpdate ? .5 : 1 }}>
+            <span className="ic">🔄</span><div className="mt"><div>Проверить обновления</div><div className="ds">{checkingUpdate ? 'Проверяем...' : 'Обновить ядро OlcRTC без удаления настроек'}</div></div>
           </div>
-          <div className="mi" onClick={()=>{setCmdOutput('');setPage('console');setError(null);}}>
+          {cfg.S_PROVIDER && <div className="mi create-room-btn" onClick={() => { const urls = { telemost: 'https://telemost.yandex.ru/', wbstream: 'https://stream.wb.ru/', jazz: 'https://salutejazz.ru/calls/' }; window.open(urls[cfg.S_PROVIDER], '_blank'); }}>
+            <span className="ic">🎥</span><div className="mt"><div style={{ color: 'var(--accent)', fontWeight: 600 }}>Создать комнату</div><div className="ds">Открыть {PLABELS[cfg.S_PROVIDER]}</div></div>
+          </div>}
+          <div className="mi" onClick={() => { setCmdOutput(''); setPage('console'); setError(null); }}>
             <span className="ic">🖥️</span><div className="mt"><div>Консоль</div><div className="ds">Выполнить команду на сервере</div></div>
           </div>
-          <hr className="sep"/>
-          <div className="mi" onClick={()=>{if(window.confirm('Полностью удалить OlcRTC?'))act('uninstall');}}>
-            <span className="ic">🗑</span><div className="mt"><div style={{color:'var(--red)'}}>Удалить OlcRTC</div><div className="ds">Остановить и удалить все файлы</div></div>
+          <hr className="sep" />
+          <div className="mi" onClick={() => { if (window.confirm('Полностью удалить OlcRTC?')) act('uninstall'); }}>
+            <span className="ic">🗑</span><div className="mt"><div style={{ color: 'var(--red)' }}>Удалить OlcRTC</div><div className="ds">Остановить и удалить все файлы</div></div>
           </div>
         </>}
       </div>}
 
       {/* ══ LOGS ══ */}
-      {page==='logs' && <div className="card">
+      {page === 'logs' && <div className="card">
         <div className="ct">📋 Логи сервера</div>
-        <div className="brow" style={{marginBottom:10}}>
+        <div className="brow" style={{ marginBottom: 10 }}>
           <button className="btn bs bb" onClick={getLogs}>🔄 Обновить</button>
-          <button className="btn bs bghost" onClick={()=>setPage('menu')}>← Меню</button>
+          <button className="btn bs bghost" onClick={() => setPage('menu')}>← Меню</button>
         </div>
-        <div className="lc" ref={logsRef} style={{maxHeight:500}}><pre className="lt">{logs||'Загрузка...'}</pre></div>
+        <div className="lc" ref={logsRef} style={{ maxHeight: 500 }}><pre className="lt">{logs || 'Загрузка...'}</pre></div>
       </div>}
 
       {/* ══ CONSOLE ══ */}
-      {page==='console' && <div className="card">
+      {page === 'console' && <div className="card">
         <div className="ct">🖥️ Консоль сервера</div>
-        <div className="brow" style={{marginBottom:10}}>
-          <button className="btn bs by" onClick={()=>setCmdOutput('')}>🧹 Очистить</button>
-          <button className="btn bs bghost" onClick={()=>setPage('menu')}>← Меню</button>
+        <div className="brow" style={{ marginBottom: 10 }}>
+          <button className="btn bs by" onClick={() => setCmdOutput('')}>🧹 Очистить</button>
+          <button className="btn bs bghost" onClick={() => setPage('menu')}>← Меню</button>
         </div>
-        <div className="lc" ref={cmdRef} style={{maxHeight:'70vh',minHeight:350}}>
-          <pre className="lt">{cmdOutput || `root@${status?.server_ip||'server'}:~# Готов к работе.\nВведите команду ниже и нажмите Enter или выберите быструю команду.\n`}</pre>
-          {cmdRunning && <div style={{color:'#22c55e',fontFamily:'JetBrains Mono,monospace',fontSize:11,marginTop:4}}>⏳ Выполняется...</div>}
+        <div className="lc" ref={cmdRef} style={{ maxHeight: '70vh', minHeight: 350 }}>
+          <pre className="lt">{cmdOutput || `root@${status?.server_ip || 'server'}:~# Готов к работе.\nВведите команду ниже и нажмите Enter или выберите быструю команду.\n`}</pre>
+          {cmdRunning && <div style={{ color: '#22c55e', fontFamily: 'JetBrains Mono,monospace', fontSize: 11, marginTop: 4 }}>⏳ Выполняется...</div>}
         </div>
         <div className="con-input">
-          <input value={cmdInput} onChange={e=>setCmdInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')execCmd();}} placeholder={`root@${status?.server_ip||'server'}:~#`} disabled={cmdRunning}/>
-          <button onClick={execCmd} disabled={cmdRunning}>{cmdRunning?'◷':'▶'}</button>
+          <input value={cmdInput} onChange={e => setCmdInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') execCmd(); }} placeholder={`root@${status?.server_ip || 'server'}:~#`} disabled={cmdRunning} />
+          <button onClick={execCmd} disabled={cmdRunning}>{cmdRunning ? '◷' : '▶'}</button>
         </div>
-        <div style={{marginTop:10}}>
-          <div style={{fontSize:12,color:'var(--muted)',marginBottom:6,fontWeight:500}}>⚡ Быстрые команды:</div>
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6, fontWeight: 500 }}>⚡ Быстрые команды:</div>
           <div className="brow">
-            <button className="btn bs bb" disabled={cmdRunning} onClick={()=>execCmd('systemctl status olcrtc-panel')}>📊 Статус панели</button>
-            <button className="btn bs by" disabled={cmdRunning} onClick={()=>execCmd('systemctl restart olcrtc-panel')}>🔄 Перезапуск панели</button>
+            <button className="btn bs bb" disabled={cmdRunning} onClick={() => execCmd('systemctl status olcrtc-panel')}>📊 Статус панели</button>
+            <button className="btn bs by" disabled={cmdRunning} onClick={() => execCmd('systemctl restart olcrtc-panel')}>🔄 Перезапуск панели</button>
           </div>
         </div>
       </div>}
 
       {/* ══ INSTALL ══ */}
-      {page==='install' && !installing && <div className="card">
-        <div className="ct">🚀 {mode==='reconfig'?'Изменить конфигурацию':'Установка OlcRTC'}</div>
+      {page === 'install' && !installing && <div className="card">
+        <div className="ct">🚀 {mode === 'reconfig' ? 'Изменить конфигурацию' : 'Установка OlcRTC'}</div>
         {status?.installed && <div className="tabs">
-          <div className={`tab ${mode==='reconfig'?'active':''}`} onClick={()=>setMode('reconfig')}>⚙️ Переконфигурация</div>
-          <div className={`tab ${mode==='full'?'active':''}`} onClick={()=>setMode('full')}>🔄 Переустановка</div>
+          <div className={`tab ${mode === 'reconfig' ? 'active' : ''}`} onClick={() => setMode('reconfig')}>⚙️ Переконфигурация</div>
+          <div className={`tab ${mode === 'full' ? 'active' : ''}`} onClick={() => setMode('full')}>🔄 Переустановка</div>
         </div>}
         <form onSubmit={handleInstall}>
           <div className="fg">
             <label className="fl">Провайдер</label>
-            <select name="provider" className="fs" value={prov} onChange={e=>onProvChange(e.target.value)} style={{borderLeft:`4px solid ${PCOLORS[prov]}`}}>
+            <select name="provider" className="fs" value={prov} onChange={e => onProvChange(e.target.value)} style={{ borderLeft: `4px solid ${PCOLORS[prov]}` }}>
               <option value="telemost">Yandex Telemost — стабильно работает</option>
               <option value="wbstream">WB Stream — стабильно работает</option>
               <option value="jazz">Sber SaluteJazz — работает нестабильно</option>
@@ -278,92 +286,92 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
           <div className="fg">
             <label className="fl">Транспорт</label>
             <select name="transport" className="fs" defaultValue={TREC[prov]}>
-              {avail.map(t=><option key={t} value={t}>{t} — {TINFO[t]||''} {t===TREC[prov]?'(рекомендуется)':''}</option>)}
+              {avail.map(t => <option key={t} value={t}>{t} — {TINFO[t] || ''} {t === TREC[prov] ? '(рекомендуется)' : ''}</option>)}
             </select>
-            {prov==='jazz' && <div className="fw">⚠️ datachannel — Jazz банит IP!</div>}
-            {prov==='telemost' && <div className="fw">ℹ️ Telemost: только vp8channel и videochannel</div>}
+            {prov === 'jazz' && <div className="fw">⚠️ datachannel — Jazz банит IP!</div>}
+            {prov === 'telemost' && <div className="fw">ℹ️ Telemost: только vp8channel и videochannel</div>}
           </div>
 
           <div className="clear-row"><button type="button" className="clear-btn" onClick={clearFields}>🧹 Очистить поля</button></div>
 
           <div className="fg">
             <label className="fl">Ссылка на комнату или ID</label>
-            <input name="room" className="fi" required value={room} onChange={e=>setRoom(e.target.value)} placeholder={prov==='jazz'?'https://salutejazz.ru/calls/xxxxx?psw=...':prov==='telemost'?'https://telemost.yandex.ru/j/xxxxx':'https://stream.wb.ru/room/xxxxx'}/>
+            <input name="room" className="fi" required value={room} onChange={e => setRoom(e.target.value)} placeholder={prov === 'jazz' ? 'https://salutejazz.ru/calls/xxxxx?psw=...' : prov === 'telemost' ? 'https://telemost.yandex.ru/j/xxxxx' : 'https://stream.wb.ru/room/xxxxx'} />
             <div className="fh">Вставьте полную ссылку — ID и пароль извлекутся автоматически</div>
           </div>
-          {prov==='jazz' && <div className="fg">
+          {prov === 'jazz' && <div className="fg">
             <label className="fl">Имя бота в конференции</label>
-            <input name="bot_name" className="fi" value={botName} onChange={e=>setBotName(e.target.value)} placeholder="Случайное русское имя"/>
+            <input name="bot_name" className="fi" value={botName} onChange={e => setBotName(e.target.value)} placeholder="Случайное русское имя" />
           </div>}
           <div className="fg">
             <label className="fl">Ключ шифрования (hex, 64 символа)</label>
-            <input name="enc_key" className="fi" value={encKey} onChange={e=>setEncKey(e.target.value)} placeholder="Авто-генерация"/>
+            <input name="enc_key" className="fi" value={encKey} onChange={e => setEncKey(e.target.value)} placeholder="Авто-генерация" />
             <div className="fh">Оставьте пустым — сгенерируется надёжный ключ</div>
           </div>
           <div className="fg">
             <label className="fl">ID клиента</label>
-            <input name="client_id" className="fi" value={clientId} onChange={e=>setClientId(e.target.value)} placeholder="Авто-генерация"/>
+            <input name="client_id" className="fi" value={clientId} onChange={e => setClientId(e.target.value)} placeholder="Авто-генерация" />
           </div>
-          <button type="submit" className="btn bp">{mode==='reconfig'?'⚙️ Применить конфигурацию':'🚀 Установить и запустить'}</button>
-          <button type="button" className="btn bp bghost" style={{marginTop:8}} onClick={()=>{setPage('menu');setError(null);setSuccess(null);}}>← Назад в меню</button>
+          <button type="submit" className="btn bp">{mode === 'reconfig' ? '⚙️ Применить конфигурацию' : '🚀 Установить и запустить'}</button>
+          <button type="button" className="btn bp bghost" style={{ marginTop: 8 }} onClick={() => { setPage('menu'); setError(null); setSuccess(null); }}>← Назад в меню</button>
         </form>
       </div>}
 
       {installing && <div className="card"><div className="ip">
-        <div className="spinner"/>
-        <div style={{color:'var(--accent)',fontWeight:500,fontSize:15}}>{mode==='reconfig'?'Применяем конфигурацию...':'Установка OlcRTC'}</div>
-        {mode!=='reconfig' && <div style={{color:'var(--muted)',fontSize:12,marginTop:10,lineHeight:1.6}}>Первая установка: 5–30 мин. Не закрывайте страницу!</div>}
+        <div className="spinner" />
+        <div style={{ color: 'var(--accent)', fontWeight: 500, fontSize: 15 }}>{mode === 'reconfig' ? 'Применяем конфигурацию...' : 'Установка OlcRTC'}</div>
+        {mode !== 'reconfig' && <div style={{ color: 'var(--muted)', fontSize: 12, marginTop: 10, lineHeight: 1.6 }}>Первая установка: 5–30 мин. Не закрывайте страницу!</div>}
       </div></div>}
 
       {/* ══ DASHBOARD ══ */}
-      {page==='dashboard' && status && <>
+      {page === 'dashboard' && status && <>
         <div className="card">
           <div className="ct">📊 Статус</div>
           <div className="sr">
-            <div style={{display:'flex',alignItems:'center'}}>
-              <span className={`dot ${status.running?'on':'off'}`}/>
-              <span style={{fontWeight:600}}>{status.running?'Работает':'Остановлен'}</span>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <span className={`dot ${status.running ? 'on' : 'off'}`} />
+              <span style={{ fontWeight: 600 }}>{status.running ? 'Работает' : 'Остановлен'}</span>
             </div>
-            {status.uptime && <span style={{color:'var(--muted)',fontSize:12}}>{status.uptime}</span>}
+            {status.uptime && <span style={{ color: 'var(--muted)', fontSize: 12 }}>{status.uptime}</span>}
           </div>
-          {status.has_update && <div className="alert" style={{background:'#dbeafe',border:'1px solid #bfdbfe',color:'#1e40af',marginBottom:10}}><span>🔄</span><span>Доступно обновление</span></div>}
+          {status.has_update && <div className="alert" style={{ background: '#dbeafe', border: '1px solid #bfdbfe', color: '#1e40af', marginBottom: 10 }}><span>🔄</span><span>Доступно обновление</span></div>}
           <div className="brow">
             {status.running ? <>
-              <button className="btn bs by" disabled={loading} onClick={()=>act('restart')}>🔄 Перезапуск</button>
-              <button className="btn bs br" disabled={loading} onClick={()=>act('stop')}>⏹ Стоп</button>
-            </> : <button className="btn bs bg" disabled={loading} onClick={()=>act('start')}>▶️ Запуск</button>}
-            {status.has_update && <button className="btn bs bb" disabled={loading} onClick={()=>{if(window.confirm('Обновить? 5-30 мин.'))act('update_binary')}}>⬆️ Обновить</button>}
+              <button className="btn bs by" disabled={loading} onClick={() => act('restart')}>🔄 Перезапуск</button>
+              <button className="btn bs br" disabled={loading} onClick={() => act('stop')}>⏹ Стоп</button>
+            </> : <button className="btn bs bg" disabled={loading} onClick={() => act('start')}>▶️ Запуск</button>}
+            {status.has_update && <button className="btn bs bb" disabled={loading} onClick={() => { if (window.confirm('Обновить? 5-30 мин.')) act('update_binary') }}>⬆️ Обновить</button>}
           </div>
         </div>
 
         {cfg.S_PROVIDER && <div className="card">
-          <div className="ct" style={{justifyContent:'center',flexWrap:'wrap',gap:'8px'}}>⚙️ Конфигурация <span className={`prov-badge ${cfg.S_PROVIDER==='telemost'?'yandex':''}`} style={{background:PCOLORS[cfg.S_PROVIDER]||'#666'}}>{PLABELS[cfg.S_PROVIDER]||cfg.S_PROVIDER}</span></div>
-          {getInviteLink() && <div style={{textAlign:'center',marginBottom:12}}><a href={getInviteLink()} target="_blank" rel="noreferrer" className="join-btn">🌐 Войти в конференцию</a></div>}
+          <div className="ct" style={{ justifyContent: 'center', flexWrap: 'wrap', gap: '8px' }}>⚙️ Конфигурация <span className={`prov-badge ${cfg.S_PROVIDER === 'telemost' ? 'yandex' : ''}`} style={{ background: PCOLORS[cfg.S_PROVIDER] || '#666' }}>{PLABELS[cfg.S_PROVIDER] || cfg.S_PROVIDER}</span></div>
+          {getInviteLink() && <div style={{ textAlign: 'center', marginBottom: 12 }}><a href={getInviteLink()} target="_blank" rel="noreferrer" className="join-btn">🌐 Войти в конференцию</a></div>}
           <div className="cg">
-            {[['Провайдер',PLABELS[cfg.S_PROVIDER]||cfg.S_PROVIDER],['Транспорт',cfg.S_TRANSPORT],['ID звонка',cfg.S_ROOM_ID],['Ключ шифрования',cfg.S_ENC_KEY],['ID клиента',cfg.S_CLIENT_ID]].map(([l,v])=>
-              <div className="ci" key={l} onClick={()=>copy(v,l)}><span className="cl">{l}</span><span className="cv">{v}</span><span className={`toast ${copied===l?'show':''}`}>✓ Скопировано</span></div>
+            {[['Провайдер', PLABELS[cfg.S_PROVIDER] || cfg.S_PROVIDER], ['Транспорт', cfg.S_TRANSPORT], ['ID звонка', cfg.S_ROOM_ID], ['Ключ шифрования', cfg.S_ENC_KEY], ['ID клиента', cfg.S_CLIENT_ID]].map(([l, v]) =>
+              <div className="ci" key={l} onClick={() => copy(v, l)}><span className="cl">{l}</span><span className="cv">{v}</span><span className={`toast ${copied === l ? 'show' : ''}`}>✓ Скопировано</span></div>
             )}
-            {cfg.S_BOT_NAME && <div className="ci" onClick={()=>copy(cfg.S_BOT_NAME,'bot')}><span className="cl">Имя бота</span><span className="cv">{cfg.S_BOT_NAME}</span><span className={`toast ${copied==='bot'?'show':''}`}>✓ Скопировано</span></div>}
+            {cfg.S_BOT_NAME && <div className="ci" onClick={() => copy(cfg.S_BOT_NAME, 'bot')}><span className="cl">Имя бота</span><span className="cv">{cfg.S_BOT_NAME}</span><span className={`toast ${copied === 'bot' ? 'show' : ''}`}>✓ Скопировано</span></div>}
           </div>
           {uri && <>
-            <div className="ul" style={{marginTop:14,textAlign:'center'}}>📥 URI для Olcbox (нажмите для копирования)</div>
-            <div className={`ub ${copied==='uri'?'copied-uri':''}`} onClick={()=>copy(uri,'uri')} style={{marginTop:4}}>
+            <div className="ul" style={{ marginTop: 14, textAlign: 'center' }}>📥 URI для Olcbox (нажмите для копирования)</div>
+            <div className={`ub ${copied === 'uri' ? 'copied-uri' : ''}`} onClick={() => copy(uri, 'uri')} style={{ marginTop: 4 }}>
               <div className="toast-uri">✓ Скопировано в буфер!</div>
               <div className="uv">{uri}</div>
             </div>
           </>}
-          <div style={{marginTop:10,padding:8,background:'var(--ibg)',borderRadius:8}}>
-            <div style={{fontSize:11,color:'var(--muted)',marginBottom:3}}>📥 Olcbox:</div>
-            <a href="https://github.com/alananisimov/olcbox/releases" target="_blank" rel="noreferrer" style={{fontSize:12,color:'var(--accent)'}}>github.com/alananisimov/olcbox/releases</a>
+          <div style={{ marginTop: 10, padding: 8, background: 'var(--ibg)', borderRadius: 8 }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 3 }}>📥 Olcbox:</div>
+            <a href="https://github.com/alananisimov/olcbox/releases" target="_blank" rel="noreferrer" style={{ fontSize: 12, color: 'var(--accent)' }}>github.com/alananisimov/olcbox/releases</a>
           </div>
         </div>}
 
         <div className="card">
           <div className="ct">🛠 Управление</div>
           <div className="brow">
-            <button className="btn bs bb" onClick={()=>{setMode('reconfig');setPage('install');setError(null);setSuccess(null);clearFields();}}>⚙️ Настройки</button>
-            <button className="btn bs br" disabled={loading} onClick={()=>{if(window.confirm('Удалить OlcRTC?'))act('uninstall')}}>🗑 Удалить</button>
-            <button className="btn bs bghost" onClick={()=>setPage('menu')}>← Меню</button>
+            <button className="btn bs bb" onClick={() => { setMode('reconfig'); setPage('install'); setError(null); setSuccess(null); clearFields(); }}>⚙️ Настройки</button>
+            <button className="btn bs br" disabled={loading} onClick={() => { if (window.confirm('Удалить OlcRTC?')) act('uninstall') }}>🗑 Удалить</button>
+            <button className="btn bs bghost" onClick={() => setPage('menu')}>← Меню</button>
           </div>
         </div>
       </>}
